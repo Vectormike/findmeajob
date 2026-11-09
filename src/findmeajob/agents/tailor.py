@@ -40,23 +40,23 @@ SYSTEM = (
     "otherwise a standard one such as Frontend, Messaging & Streaming, or Engineering Practices. A frontend "
     "framework is never Backend. Engineering Practices are named disciplines like Distributed Systems or Automated "
     "Testing, never adjectives such as resilient or scalable, and never a restatement of a language or tool. "
-    "Give the evidence too. Usually 6-12 terms. Those terms lead their category in the Skills section, followed by "
-    "the other relevant supported skills. Never list a gap in role_skills or Skills. "
+    "Give the evidence too. Usually 6-12 terms. In related_skills, list up to 8 more skills the master CV or "
+    "profile proves that are closely tied to those requirements, categorized the same way. Leave out skills "
+    "unrelated to this job. Never list a gap in either. The Skills section is built from these two lists, so "
+    "leave it out of cv_html. "
     "Use current profile contact facts when present and the master CV for any missing header facts. "
     "Aim for a focused two-page CV. Do not mention gaps, requirements, tailoring, or the target company in the CV. "
     "cv_html must use this shape and nothing else. No markdown fences, no wrapping quotes. "
-    "Section order is Work Experience, then Skills, then Education.\n"
+    "Section order is Work Experience, then Education.\n"
     '<div class="head"><h1>Full name</h1><div class="identity">'
     "<p>Title<br>City, Country<br>link<br>link<br>email</p>"
     '<p class="summary">Summary paragraph from the master CV.</p></div></div>\n'
     "<h2>Work Experience</h2>"
     '<div class="role"><p class="role-line"><strong>Title</strong><span>Company</span>'
     '<span class="when">Mon YYYY - Mon YYYY</span></p><ul><li>bullet copied from the master CV</li></ul></div>\n'
-    '<h2>Skills</h2><div class="skills"><p><strong>Category</strong><span>skill, skill</span></p></div>\n'
     '<h2>Education</h2><p class="role-line"><strong>Degree</strong><span>School</span>'
     '<span class="when">dates</span></p>\n'
-    "One role block per job, newest first. Title, company, and dates stay on the role-line, never in the bullets. "
-    "Keep the master CV's skill category names. One category per skills paragraph."
+    "One role block per job, newest first. Title, company, and dates stay on the role-line, never in the bullets."
 )
 
 ALLOWED_TAGS = {"h1", "h2", "p", "ul", "ol", "li", "strong", "em", "a", "br", "div", "span"}
@@ -96,6 +96,7 @@ class TailoredCv(BaseModel):
     changes: list[CvChange]
     gaps: list[str] = Field(description="Requirements found in neither the master CV nor the profile")
     role_skills: list[RoleSkill] = Field(default=[], description="Posting skills the candidate's evidence proves")
+    related_skills: list[RoleSkill] = Field(default=[], description="Proven skills closely tied to the role skills")
 
 
 def fit_brief(fit: dict[str, Any]) -> str:
@@ -158,38 +159,40 @@ def mentions(text: str, term: str) -> bool:
     return re.search(rf"(?<!\w){re.escape(term)}(?!\w)", text, re.IGNORECASE) is not None
 
 
-def skill_items(row: Any) -> list[str]:
-    return [item.strip() for item in row.span.get_text().split(",") if item.strip()]
-
-
-def add_role_skills(html: str, skills: list[RoleSkill], gaps: list[str]) -> str:
+def set_skills(html: str, role: list[RoleSkill], related: list[RoleSkill], gaps: list[str]) -> str:
     soup = BeautifulSoup(html, "html.parser")
-    block = soup.find("div", class_="skills")
-    if not block:
-        return html
-    rows = {p.strong.get_text().strip().lower(): p for p in block.find_all("p") if p.strong and p.span}
+    for old in soup.find_all("div", class_="skills"):
+        old.decompose()
+    for heading in soup.find_all("h2"):
+        if heading.get_text().strip().lower() == "skills":
+            heading.decompose()
+    groups: dict[str, tuple[str, list[str]]] = {}
+    seen: set[str] = set()
     gap_text = " ".join(gaps)
-    for skill in reversed(skills):
+    for skill in [*role, *related]:
         term = skill.term.strip()
-        if not term or mentions(gap_text, term):
+        if not term or term.lower() in seen or mentions(gap_text, term):
             continue
+        seen.add(term.lower())
         if term == term.lower():
             term = term[0].upper() + term[1:]
-        for row in rows.values():
-            row.span.string = ", ".join(item for item in skill_items(row) if item.lower() != term.lower())
         category = skill.category.strip() or "Engineering Practices"
-        row = rows.get(category.lower())
-        if not row:
-            row = soup.new_tag("p")
-            label, items = soup.new_tag("strong"), soup.new_tag("span")
-            label.string = category
-            row.extend([label, items])
-            block.append(row)
-            rows[category.lower()] = row
-        row.span.string = ", ".join([term, *skill_items(row)])
-    for row in rows.values():
-        if not skill_items(row):
-            row.decompose()
+        groups.setdefault(category.lower(), (category, []))[1].append(term)
+    if not groups:
+        return str(soup)
+    heading, block = soup.new_tag("h2"), soup.new_tag("div", attrs={"class": "skills"})
+    heading.string = "Skills"
+    for category, terms in groups.values():
+        row, label, items = soup.new_tag("p"), soup.new_tag("strong"), soup.new_tag("span")
+        label.string, items.string = category, ", ".join(terms)
+        row.extend([label, items])
+        block.append(row)
+    education = next((h for h in soup.find_all("h2") if h.get_text().strip().lower() == "education"), None)
+    if education:
+        education.insert_before(heading, block)
+    else:
+        soup.append(heading)
+        soup.append(block)
     return str(soup)
 
 
@@ -203,7 +206,7 @@ async def run(state: CaseState, deps: Deps, store: BaseStore) -> dict[str, Any]:
         ask(deps.model, TailoredCv, SYSTEM, context, REASONING_EFFORT),
         timeout=PASS_TIMEOUT_SECONDS,
     )
-    html = PAGE.format(body=add_role_skills(clean_html(cv.cv_html), cv.role_skills, cv.gaps))
+    html = PAGE.format(body=set_skills(clean_html(cv.cv_html), cv.role_skills, cv.related_skills, cv.gaps))
     result = {**cv.model_dump(), "cv_html": html, "pdf": ""}
     if deps.chrome:
         pdf = await deps.chrome.render_pdf(html, deps.data_dir / "cvs" / f"{state['case_id']}.pdf")

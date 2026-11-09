@@ -1,6 +1,6 @@
 from langgraph.store.memory import InMemoryStore
 
-from findmeajob.agents.tailor import PAGE, RoleSkill, add_role_skills, clean_html, fit_brief, focused_posting, run
+from findmeajob.agents.tailor import PAGE, RoleSkill, clean_html, fit_brief, focused_posting, run, set_skills
 from findmeajob.memory import write_profile
 from tests.conftest import POSTING
 
@@ -29,30 +29,32 @@ def test_cv_html_keeps_the_resume_layout():
     assert "Ada Lovelace" in page
 
 
-def test_role_skills_lead_the_skills_section():
-    skills = [
-        RoleSkill(term="Kafka", category="Backend", evidence="Bujeti"),
-        RoleSkill(term="Go", category="Languages", evidence="already listed"),
+def test_skills_show_requirement_skills_then_related_ones():
+    role = [
+        RoleSkill(term="Go", category="Languages", evidence="Bujeti"),
+        RoleSkill(term="Kafka", category="Messaging & Streaming", evidence="Bujeti"),
         RoleSkill(term="distributed systems", category="Engineering Practices", evidence="Bujeti"),
         RoleSkill(term="RAG pipelines", category="AI", evidence="none"),
-        RoleSkill(term="SQL", category="Databases", evidence="Crenet"),
-        RoleSkill(term="React", category="Frontend", evidence="Hotels.ng"),
     ]
-    html = add_role_skills(
-        '<div class="skills"><p><strong>Languages</strong><span>Go</span></p>'
-        "<p><strong>Backend</strong><span>React, Node.js</span></p>"
-        "<p><strong>Databases</strong><span>MySQL, MongoDB</span></p>"
-        "<p><strong>UI</strong><span>React</span></p></div>",
-        skills,
+    related = [
+        RoleSkill(term="SQL", category="Languages", evidence="Crenet"),
+        RoleSkill(term="kafka", category="Backend", evidence="duplicate"),
+        RoleSkill(term="RabbitMQ", category="Messaging & Streaming", evidence="Crenet"),
+    ]
+    html = set_skills(
+        '<h2>Work Experience</h2><h2>Skills</h2><div class="skills"><p><strong>Design</strong>'
+        "<span>Figma</span></p></div><h2>Education</h2>",
+        role,
+        related,
         gaps=["Familiarity with RAG pipelines on Google Cloud"],
     )
-    assert "<span>Kafka, Node.js</span>" in html
-    assert "<span>Go</span>" in html
-    assert "<span>SQL, MySQL, MongoDB</span>" in html
-    assert "<strong>Frontend</strong><span>React</span>" in html
+    assert "Figma" not in html and "RAG" not in html and "Backend" not in html
+    assert html.count("<h2>Skills</h2>") == 1
+    assert html.index("<h2>Skills</h2>") < html.index("<h2>Education</h2>")
+    assert "<strong>Languages</strong><span>Go, SQL</span>" in html
+    assert "<strong>Messaging &amp; Streaming</strong><span>Kafka, RabbitMQ</span>" in html
     assert "<strong>Engineering Practices</strong><span>Distributed systems</span>" in html
-    assert html.count("React") == 1 and "UI" not in html
-    assert "RAG" not in html
+    assert html.index("Languages") < html.index("Messaging") < html.index("Engineering Practices")
 
 
 def test_fit_brief_passes_the_judges_ranking():
