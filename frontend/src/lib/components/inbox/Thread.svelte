@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { ExternalLink, RotateCw } from '@lucide/svelte';
+	import { ExternalLink, PanelRight, RotateCw } from '@lucide/svelte';
 	import { agent } from '#lib/agents.ts';
 	import { api, type CaseDetail } from '#lib/api.ts';
 	import { initials } from '#lib/format.ts';
@@ -11,16 +11,31 @@
 	import Composer from './Composer.svelte';
 	import Prep from './Prep.svelte';
 
-	let { detail, onchange }: { detail: CaseDetail; onchange: (next: CaseDetail) => void } = $props();
+	let {
+		detail,
+		onchange,
+		ondetails
+	}: { detail: CaseDetail; onchange: (next: CaseDetail) => void; ondetails: () => void } = $props();
 	const c = $derived(detail.case);
 	const items = $derived(timeline(c));
 	const busy = $derived(live.working[c.case_id]);
 	let tab = $state<'thread' | 'prep'>('thread');
 	let retrying = $state(false);
+	const latest = $derived(
+		new Map(items.flatMap((item, i) => (item.kind === 'agent' ? [[item.agent, i] as const] : [])))
+	);
 
 	async function retry() {
 		retrying = true;
 		await api.retry(c.case_id).finally(() => (retrying = false));
+	}
+
+	function retryAgent(name: string, i: number) {
+		if (busy || retrying || latest.get(name) !== i || !detail.retryable.includes(name)) return undefined;
+		return async () => {
+			retrying = true;
+			await api.retryAgent(c.case_id, name).finally(() => (retrying = false));
+		};
 	}
 </script>
 
@@ -38,6 +53,7 @@
 			{#if c.posting.url}
 				<a class="btn small" href={c.posting.url} target="_blank" rel="noopener"><ExternalLink size={13} /> Posting</a>
 			{/if}
+			<button class="btn small" onclick={ondetails}><PanelRight size={14} /> Details</button>
 		</div>
 	</header>
 
@@ -63,7 +79,12 @@
 				{#if i === 0 || day(item.at) !== day(items[i - 1].at)}
 					<p class="divider small faint">{day(item.at)}</p>
 				{/if}
-				<Bubble {item} caseId={c.case_id} onprep={() => (tab = 'prep')} />
+				<Bubble
+					{item}
+					caseId={c.case_id}
+					onprep={() => (tab = 'prep')}
+					onretry={item.kind === 'agent' ? retryAgent(item.agent, i) : undefined}
+				/>
 			{/each}
 			{#if busy}
 				<div class="typing row">
@@ -85,8 +106,13 @@
 		border-right: 1px solid var(--line);
 	}
 	header {
-		padding: 12px 20px;
+		padding: 14px 22px;
 		border-bottom: 1px solid var(--line);
+		gap: 12px;
+	}
+	header > .row:last-child {
+		flex-wrap: wrap;
+		justify-content: flex-end;
 	}
 	.logo {
 		display: grid;
@@ -118,7 +144,7 @@
 	.body {
 		flex: 1;
 		overflow: auto;
-		padding: 16px 20px;
+		padding: 20px 24px;
 		display: flex;
 		flex-direction: column;
 		gap: 16px;

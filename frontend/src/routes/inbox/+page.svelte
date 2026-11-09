@@ -11,7 +11,9 @@
 	let inbox = $state<Inbox>({ cases: [], counts: {}, unmatched: [] });
 	let detail = $state<CaseDetail | null>(null);
 	let filter = $state('all');
+	let detailsOpen = $state(false);
 	const selected = $derived(page.url.searchParams.get('case') ?? inbox.cases[0]?.key ?? null);
+	const selectedCase = $derived(detail && selected ? { ...detail.index, key: selected } : null);
 
 	$effect(() => {
 		void live.tick;
@@ -29,16 +31,19 @@
 	});
 
 	function select(id: string) {
+		detailsOpen = false;
 		goto(`/inbox?case=${id}`, { reset: false });
 	}
 </script>
 
-<div class="inbox">
-	<CaseList {inbox} {selected} bind:filter onselect={select} />
+<div class="inbox" class:details-open={detailsOpen}>
+	<CaseList {inbox} {selected} {selectedCase} bind:filter onselect={select} />
 	{#if detail && detail.case.case_id === selected}
 		{#key detail.case.case_id}
-			<Thread {detail} onchange={(next) => (detail = next)} />
-			<Details {detail} onchange={(next) => (detail = next)} />
+			<Thread {detail} onchange={(next) => (detail = next)} ondetails={() => (detailsOpen = true)} />
+			{#if detailsOpen}
+				<Details {detail} onchange={(next) => (detail = next)} onclose={() => (detailsOpen = false)} />
+			{/if}
 		{/key}
 	{:else}
 		<div class="placeholder empty">{selected ? 'Loading case…' : 'Select a case to see its thread.'}</div>
@@ -48,9 +53,20 @@
 <style>
 	.inbox {
 		display: grid;
-		grid-template-columns: 290px minmax(0, 1fr) 320px;
+		grid-template-columns: 280px minmax(0, 1fr) 0px;
 		grid-template-rows: minmax(0, 1fr);
 		height: 100%;
+		position: relative;
+		overflow: hidden;
+		transition: grid-template-columns 220ms ease;
+	}
+	@media (prefers-reduced-motion: reduce) {
+		.inbox {
+			transition: none;
+		}
+	}
+	.inbox.details-open {
+		grid-template-columns: 280px minmax(0, 1fr) 340px;
 	}
 	.inbox > :global(*) {
 		min-height: 0;
@@ -60,15 +76,18 @@
 		align-self: center;
 	}
 	@media (max-width: 1180px) {
-		.inbox {
+		.inbox,
+		.inbox.details-open {
 			grid-template-columns: 250px minmax(0, 1fr);
-			grid-template-rows: calc(100vh - 52px) auto;
-			overflow: auto;
-			height: auto;
 		}
 		.inbox :global(aside.col) {
-			grid-column: 2;
-			border-top: 1px solid var(--line);
+			position: absolute;
+			z-index: 4;
+			inset: 0 0 0 auto;
+			width: min(370px, 100%);
+			background: var(--panel);
+			border-left: 1px solid var(--line);
+			box-shadow: -12px 0 32px rgb(16 24 40 / 12%);
 		}
 	}
 </style>

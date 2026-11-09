@@ -58,4 +58,9 @@ async def case_detail(workflow: Workflow, case_id: str) -> dict[str, Any]:
     cv = values.get("cv")
     if cv:
         case["cv"] = {k: v for k, v in cv.items() if k not in ("cv_html", "pdf")} | {"has_pdf": bool(cv.get("pdf"))}
-    return {"case": case, "index": item.value if item else {}, "waiting": await workflow.waiting(case_id)}
+    return {
+        "case": case,
+        "index": item.value if item else {},
+        "waiting": await workflow.waiting(case_id),
+        "retryable": await workflow.retryable(case_id),
+    }

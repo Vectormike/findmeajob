@@ -1,7 +1,8 @@
 import asyncio
+import re
 from typing import Any, Literal
 
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, NavigableString
 from langgraph.store.base import BaseStore
 from pydantic import BaseModel, Field
 
@@ -20,7 +21,9 @@ SYSTEM = (
     "requirements easy to find. "
     "You may rewrite bullets for clarity and relevance, but every employer, title, date, skill, event, metric, "
     "tool, and outcome must be grounded in the master CV or profile. Never merge facts from different employers. "
-    "Mirror the posting's exact terms only when the candidate's evidence genuinely supports them. "
+    "Mirror the posting's exact terms only when the candidate's evidence genuinely supports them, including its "
+    "descriptive phrases such as strongly-typed, resilient, or comfortable with ambiguity: when the CV shows it, "
+    "use the posting's own wording in the summary or a bullet. "
     "You may add experience that appears in the profile (skills, stories) but is missing from the master CV, "
     "attached to the employer and dates the profile gives; mark those changes with source 'profile'. "
     "Never invent skills, employers, titles, dates, or metrics in the summary or work bullets. A requirement found "
@@ -28,6 +31,11 @@ SYSTEM = (
     "Keep the candidate's real professional title; you may append a specialization after a | only when the source "
     "evidence directly supports it. Write a job-specific 45-70 word summary that leads with the "
     "top supported requirements, strongest relevant scope, and grounded metrics. Avoid generic claims. "
+    "Write like the candidate, not like an AI. Keep the master CV's own wording wherever it already fits and "
+    "change only what the job needs. Use plain, specific verbs such as built, designed, fixed, ran, or cut. Never "
+    "use em dashes, semicolons, or filler words such as leveraged, spearheaded, robust, seamless, cutting-edge, "
+    "streamlining, boosting, ensuring, utilize, or passionate, and never write in the first person. Vary sentence length and do not force every list "
+    "into three items. "
     "Keep every role in reverse chronology. Within each role, select 1-5 relevant bullets and order the strongest "
     "evidence first. Front-load the job's supported keywords and retain the original facts and metrics. "
     "Do not keep an irrelevant bullet merely to fill space. Ensure every supported must-have appears in the "
@@ -63,8 +71,8 @@ PAGE = """<!doctype html><html><head><meta charset="utf-8"><style>
 body {{ font-family: Helvetica, Arial, sans-serif; color: #1a1a1a; font-size: 10pt; line-height: 1.35; margin: 0; }}
 h1 {{ font-size: 22pt; line-height: 1.1; margin: 0 0 10pt; }}
 h2 {{ font-size: 13pt; color: #2f5bd3; font-weight: 650; margin: 14pt 0 8pt; border-bottom: 1.5px solid #2f5bd3; padding-bottom: 2pt; }}
-.identity {{ display: grid; grid-template-columns: 0.85fr 1.25fr; column-gap: 22pt; align-items: start; }}
 .identity p {{ margin: 0; }}
+.identity .summary {{ margin-top: 8pt; }}
 .role {{ margin: 0 0 9pt; }}
 .role-line {{ display: grid; grid-template-columns: 1.25fr 1fr auto; column-gap: 10pt; align-items: baseline; margin: 9pt 0 2pt; }}
 .when {{ text-align: right; white-space: nowrap; }}
@@ -142,6 +150,10 @@ def clean_html(html: str) -> str:
             attrs["class"] = kept
         tag.attrs = attrs
     for text in list(soup.find_all(string=True)):
+        if "—" in text:
+            plain = NavigableString(re.sub(r"\s*—\s*", ", ", text))
+            text.replace_with(plain)
+            text = plain
         cleaned = text.strip()
         if len(cleaned) >= 2 and cleaned[0] in "\"'`“”" and cleaned[-1] in "\"'`“”":
             text.replace_with(cleaned[1:-1])

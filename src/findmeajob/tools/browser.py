@@ -214,6 +214,12 @@ class Chrome:
         await page.close()
         return path
 
+    async def healthcheck(self) -> None:
+        await self._start()
+        page = await self._context.new_page()
+        await page.set_content("<title>Clerk ready</title>")
+        await page.close()
+
     async def close(self) -> None:
         if self._context:
             await self._context.close()

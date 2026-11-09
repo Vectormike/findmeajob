@@ -38,6 +38,12 @@ def test_cv_html_keeps_the_resume_layout():
     assert "Ada Lovelace" in page
 
 
+def test_cv_html_drops_em_dashes():
+    assert clean_html("<li>Built payments—ledgers and settlement — fast.</li>") == (
+        "<li>Built payments, ledgers and settlement, fast.</li>"
+    )
+
+
 def test_skills_list_only_what_the_posting_asks_for():
     skills = [
         RoleSkill(term="Go", category="Languages", evidence="Bujeti"),

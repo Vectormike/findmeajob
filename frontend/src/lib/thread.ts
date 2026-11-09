@@ -1,4 +1,4 @@
-import type { Case, Mail } from './api.ts';
+import type { Case, FitArea, Mail } from './api.ts';
 import { count } from './format.ts';
 
 export type AgentItem = {
@@ -8,6 +8,7 @@ export type AgentItem = {
 	title: string;
 	body?: string;
 	bullets?: string[];
+	fits?: { title: string; area: FitArea }[];
 	action?: 'cv' | 'prep';
 	tone?: 'red';
 };
@@ -29,14 +30,22 @@ export function timeline(c: Case): Item[] {
 		body: `Found ${c.posting.title} at ${c.posting.company}${c.posting.source ? ` on ${c.posting.source}` : ''}${where ? ` for ${where}` : ''}.`
 	});
 	if (c.fit) {
+		const { technical, behavioural } = c.fit;
+		const fits = technical && behavioural
+			? [
+					{ title: 'Technical fit', area: technical },
+					{ title: 'Behavioural fit', area: behavioural }
+				]
+			: undefined;
 		items.push({
 			kind: 'agent',
 			at: applied - 2000,
 			agent: 'judge',
 			title: `Fit note: ${c.fit.recommendation}`,
 			body: c.fit.reason,
+			fits,
 			bullets: [
-				...(c.fit.must_haves_missing ?? []).map((m) => `Missing: ${m}`),
+				...(fits ? [] : (c.fit.must_haves_missing ?? []).map((m) => `Missing: ${m}`)),
 				...(c.fit.red_flags ?? []).map((f) => `Red flag: ${f}`)
 			]
 		});

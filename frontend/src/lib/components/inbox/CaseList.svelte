@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { CalendarCheck, CircleCheck, Inbox as InboxIcon, MailCheck, Send } from '@lucide/svelte';
 	import { agent } from '#lib/agents.ts';
-	import { api, type Inbox } from '#lib/api.ts';
+	import { api, type CaseRow, type Inbox } from '#lib/api.ts';
 	import { ago, initials } from '#lib/format.ts';
 	import { live } from '#lib/live.svelte.ts';
 	import Badge from '../Badge.svelte';
@@ -9,9 +9,16 @@
 	let {
 		inbox,
 		selected,
+		selectedCase,
 		filter = $bindable('all'),
 		onselect
-	}: { inbox: Inbox; selected: string | null; filter: string; onselect: (id: string) => void } = $props();
+	}: {
+		inbox: Inbox;
+		selected: string | null;
+		selectedCase: CaseRow | null;
+		filter: string;
+		onselect: (id: string) => void;
+	} = $props();
 
 	const groups = [
 		{ key: 'all', label: 'All open', icon: InboxIcon },
@@ -27,6 +34,7 @@
 		debrief: ['debriefed']
 	};
 	const shown = $derived(inbox.cases.filter((c) => filter === 'all' || STAGES[filter]?.includes(c.stage)));
+	const pinned = $derived(selectedCase && !inbox.cases.some((c) => c.key === selectedCase.key) ? selectedCase : null);
 	let target = $state<Record<string, string>>({});
 	let note = $state('');
 
@@ -37,6 +45,24 @@
 		await api.assign(key, caseId).catch((e: Error) => (note = e.message));
 	}
 </script>
+
+{#snippet caseCard(c: CaseRow)}
+	{@const busy = live.working[c.key]}
+	<button class="case" class:selected={selected === c.key} onclick={() => onselect(c.key)}>
+		<div class="row between">
+			<span class="row"><span class="logo">{initials(c.company)}</span><b>{c.company}</b></span>
+			{#if busy}
+				<span class="pulse small working">{agent(busy).title}'s on it</span>
+			{:else if c.error}
+				<Badge value="error" />
+			{:else}
+				<Badge value={c.stage} />
+			{/if}
+		</div>
+		<p class="muted title">{c.title}</p>
+		<p class="small faint">{ago(c.updated_at)}</p>
+	</button>
+{/snippet}
 
 <section class="col">
 	<div class="row between head"><h1>Inbox</h1></div>
@@ -70,28 +96,17 @@
 		{#if note}<p class="small error-text">{note}</p>{/if}
 	{/if}
 
+	{#if pinned}
+		<p class="section-label">Viewing</p>
+		<div class="pinned">{@render caseCard(pinned)}</div>
+	{/if}
+
 	<p class="section-label">Cases</p>
 	<ul class="cases">
 		{#each shown as c (c.key)}
-			{@const busy = live.working[c.key]}
-			<li>
-				<button class="case" class:selected={selected === c.key} onclick={() => onselect(c.key)}>
-					<div class="row between">
-						<span class="row"><span class="logo">{initials(c.company)}</span><b>{c.company}</b></span>
-						{#if busy}
-							<span class="pulse small working">{agent(busy).title}'s on it</span>
-						{:else if c.error}
-							<Badge value="error" />
-						{:else}
-							<Badge value={c.stage} />
-						{/if}
-					</div>
-					<p class="small muted title">{c.title}</p>
-					<p class="small faint">{ago(c.updated_at)}</p>
-				</button>
-			</li>
+			<li>{@render caseCard(c)}</li>
 		{:else}
-			<li class="empty">no open cases yet. send scout from <a href="/cases"><u>Cases</u></a>.</li>
+			<li class="empty">{pinned ? 'No other open cases.' : 'No open cases yet. Send Scout from '} {#if !pinned}<a href="/cases"><u>Cases</u></a>.{/if}</li>
 		{/each}
 	</ul>
 </section>
@@ -159,6 +174,9 @@
 		display: flex;
 		flex-direction: column;
 		gap: 8px;
+	}
+	.pinned {
+		margin-bottom: 4px;
 	}
 	.case {
 		width: 100%;

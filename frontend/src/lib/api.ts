@@ -38,6 +38,8 @@ export type Mail = {
 
 export type Claim = { text: string; source_url: string };
 
+export type FitArea = { verdict: string; covered: string[]; missing: string[] };
+
 export type Case = {
 	case_id: string;
 	stage: string;
@@ -49,6 +51,8 @@ export type Case = {
 		reason: string;
 		must_haves_covered?: string[];
 		must_haves_missing?: string[];
+		technical?: FitArea;
+		behavioural?: FitArea;
 		seniority?: string;
 		location_and_pay?: string;
 		red_flags?: string[];
@@ -96,7 +100,7 @@ export type Case = {
 	sent: { to: string; subject: string; body: string; at: string }[];
 };
 
-export type CaseDetail = { case: Case; index: CaseRow; waiting: boolean };
+export type CaseDetail = { case: Case; index: CaseRow; waiting: boolean; retryable: string[] };
 
 export type Unmatched = {
 	key: string;
@@ -127,7 +131,15 @@ export type MemoryEntry = { key: string; kind: 'lesson' | 'story'; text: string;
 
 export type AgentCard = { name: string; job: string; count: number; last: CaseRow | null };
 
-export type Integration = { key: string; name: string; job: string; agents: string[]; status: Status | null };
+export type Integration = {
+	key: string;
+	name: string;
+	job: string;
+	agents: string[];
+	configured: boolean;
+	active: boolean;
+	status: Status | null;
+};
 
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
 	const json = body !== undefined && !(body instanceof Blob);
@@ -160,6 +172,7 @@ export const api = {
 	discard: (id: string) => request<CaseDetail>('POST', `/cases/${id}/discard`),
 	close: (id: string) => request<CaseDetail>('POST', `/cases/${id}/close`),
 	retry: (id: string) => request('POST', `/cases/${id}/retry`),
+	retryAgent: (id: string, agent: string) => request('POST', `/cases/${id}/retry/${agent}`),
 	assign: (key: string, caseId: string) => request('POST', `/unmatched/${key}/assign`, { case_id: caseId }),
 	dismiss: (key: string) => request('DELETE', `/unmatched/${key}`),
 	agents: () => request<AgentCard[]>('GET', '/agents'),
@@ -169,5 +182,7 @@ export const api = {
 		request<{ profile: Profile; memory: MemoryEntry[] }>('PUT', `/profile/cv?name=${encodeURIComponent(file.name)}`, file),
 	decide: (key: string, decision: 'accepted' | 'dismissed') =>
 		request<{ profile: Profile; memory: MemoryEntry[] }>('POST', `/profile/memory/${key}/${decision}`),
-	integrations: () => request<Integration[]>('GET', '/integrations')
+	integrations: () => request<Integration[]>('GET', '/integrations'),
+	testIntegration: (key: string) => request<{ status: string; detail: string }>('POST', `/integrations/${key}/test`),
+	connectGmail: () => request<{ status: string; detail: string }>('POST', '/integrations/gmail/connect')
 };
