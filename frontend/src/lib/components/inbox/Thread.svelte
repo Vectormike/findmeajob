@@ -26,6 +26,7 @@
 	);
 
 	async function retry() {
+		if (retrying) return;
 		retrying = true;
 		await api.retry(c.case_id).finally(() => (retrying = false));
 	}
@@ -33,6 +34,7 @@
 	function retryAgent(name: string, i: number) {
 		if (busy || retrying || latest.get(name) !== i || !detail.retryable.includes(name)) return undefined;
 		return async () => {
+			if (retrying) return;
 			retrying = true;
 			await api.retryAgent(c.case_id, name).finally(() => (retrying = false));
 		};

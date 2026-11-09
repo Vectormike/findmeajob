@@ -31,12 +31,17 @@ export function timeline(c: Case): Item[] {
 	});
 	if (c.fit) {
 		const { technical, behavioural } = c.fit;
-		const fits = technical && behavioural
-			? [
-					{ title: 'Technical fit', area: technical },
-					{ title: 'Behavioural fit', area: behavioural }
-				]
-			: undefined;
+		const covered = c.fit.must_haves_covered ?? [];
+		const missing = c.fit.must_haves_missing ?? [];
+		const fits =
+			technical && behavioural
+				? [
+						{ title: 'Technical fit', area: technical },
+						{ title: 'Behavioural fit', area: behavioural }
+					]
+				: covered.length || missing.length
+					? [{ title: 'Must-haves', area: { verdict: '', covered, missing } }]
+					: undefined;
 		items.push({
 			kind: 'agent',
 			at: applied - 2000,
@@ -44,10 +49,7 @@ export function timeline(c: Case): Item[] {
 			title: `Fit note: ${c.fit.recommendation}`,
 			body: c.fit.reason,
 			fits,
-			bullets: [
-				...(fits ? [] : (c.fit.must_haves_missing ?? []).map((m) => `Missing: ${m}`)),
-				...(c.fit.red_flags ?? []).map((f) => `Red flag: ${f}`)
-			]
+			bullets: (c.fit.red_flags ?? []).map((f) => `Red flag: ${f}`)
 		});
 	}
 	if (c.cv) {

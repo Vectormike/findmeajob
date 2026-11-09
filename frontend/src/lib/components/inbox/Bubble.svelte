@@ -61,7 +61,7 @@
 			{#each item.fits ?? [] as fit (fit.title)}
 				<div class="fit">
 					<p class="fit-title"><b>{fit.title}</b></p>
-					<p class="small muted">{fit.area.verdict}</p>
+					{#if fit.area.verdict}<p class="small muted">{fit.area.verdict}</p>{/if}
 					{#each fit.area.covered as met (met)}
 						<p class="small row fit-line"><Check size={13} class="ok" /> <span>{met}</span></p>
 					{/each}
