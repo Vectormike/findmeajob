@@ -1,5 +1,4 @@
 import asyncio
-import re
 from typing import Any, Literal
 
 from bs4 import BeautifulSoup
@@ -24,26 +23,24 @@ SYSTEM = (
     "Mirror the posting's exact terms only when the candidate's evidence genuinely supports them. "
     "You may add experience that appears in the profile (skills, stories) but is missing from the master CV, "
     "attached to the employer and dates the profile gives; mark those changes with source 'profile'. "
-    "Never invent skills, employers, titles, dates, or metrics. A requirement found in neither the master CV "
-    "nor the profile is a gap: list it in gaps and leave it out of the CV. "
+    "Never invent skills, employers, titles, dates, or metrics in the summary or work bullets. A requirement found "
+    "in neither the master CV nor the profile is a gap: list it in gaps and leave it out of the summary and bullets. "
     "Keep the candidate's real professional title; you may append a specialization after a | only when the source "
     "evidence directly supports it. Write a job-specific 45-70 word summary that leads with the "
     "top supported requirements, strongest relevant scope, and grounded metrics. Avoid generic claims. "
     "Keep every role in reverse chronology. Within each role, select 1-5 relevant bullets and order the strongest "
     "evidence first. Front-load the job's supported keywords and retain the original facts and metrics. "
     "Do not keep an irrelevant bullet merely to fill space. Ensure every supported must-have appears in the "
-    "summary, skills, or a work bullet. Fill role_skills by going through every posting requirement and pulling "
-    "out each concrete skill, tool, technology, or engineering practice it names, such as asynchronous service "
-    "design, data processing pipelines, automated testing, or data structures and algorithms. Keep one when the "
-    "master CV or profile proves it, even in different words, and write it in the posting's short exact wording. "
+    "summary, skills, or a work bullet. Fill role_skills by going through the whole posting and pulling out every "
+    "concrete skill, tool, technology, or engineering practice it names, such as Go, Cassandra, asynchronous "
+    "service design, or automated testing, whether or not the master CV proves it. Write each in the posting's "
+    "short exact wording. Never add a skill the posting does not name. "
     "Give the category for what the skill is, not for the role: a master CV skill category when it truly fits, "
     "otherwise a standard one such as Frontend, Messaging & Streaming, or Engineering Practices. A frontend "
     "framework is never Backend. Engineering Practices are named disciplines like Distributed Systems or Automated "
     "Testing, never adjectives such as resilient or scalable, and never a restatement of a language or tool. "
-    "Give the evidence too. Usually 6-12 terms. In related_skills, list up to 8 more skills the master CV or "
-    "profile proves that are closely tied to those requirements, categorized the same way. Leave out skills "
-    "unrelated to this job. Never list a gap in either. The Skills section is built from these two lists, so "
-    "leave it out of cv_html. "
+    "Give the evidence, or 'not on CV' when the master CV and profile do not show it. The Skills section is built "
+    "from role_skills alone, so leave it out of cv_html. "
     "Use current profile contact facts when present and the master CV for any missing header facts. "
     "Aim for a focused two-page CV. Do not mention gaps, requirements, tailoring, or the target company in the CV. "
     "cv_html must use this shape and nothing else. No markdown fences, no wrapping quotes. "
@@ -86,8 +83,8 @@ class CvChange(BaseModel):
 
 class RoleSkill(BaseModel):
     term: str = Field(description="The posting's exact wording for a skill, tool, technology, or practice")
-    category: str = Field(description="The master CV skill category it belongs to")
-    evidence: str = Field(description="Where the master CV or profile proves it")
+    category: str = Field(description="The skill category it belongs to")
+    evidence: str = Field(description="Where the master CV or profile proves it, or 'not on CV'")
 
 
 class TailoredCv(BaseModel):
@@ -95,8 +92,7 @@ class TailoredCv(BaseModel):
     cv_html: str
     changes: list[CvChange]
     gaps: list[str] = Field(description="Requirements found in neither the master CV nor the profile")
-    role_skills: list[RoleSkill] = Field(default=[], description="Posting skills the candidate's evidence proves")
-    related_skills: list[RoleSkill] = Field(default=[], description="Proven skills closely tied to the role skills")
+    role_skills: list[RoleSkill] = Field(default=[], description="Every skill the posting names")
 
 
 def fit_brief(fit: dict[str, Any]) -> str:
@@ -155,11 +151,7 @@ def clean_html(html: str) -> str:
     return "".join(str(child) for child in list(root.children) if str(child).strip())
 
 
-def mentions(text: str, term: str) -> bool:
-    return re.search(rf"(?<!\w){re.escape(term)}(?!\w)", text, re.IGNORECASE) is not None
-
-
-def set_skills(html: str, role: list[RoleSkill], related: list[RoleSkill], gaps: list[str]) -> str:
+def set_skills(html: str, skills: list[RoleSkill]) -> str:
     soup = BeautifulSoup(html, "html.parser")
     for old in soup.find_all("div", class_="skills"):
         old.decompose()
@@ -168,10 +160,9 @@ def set_skills(html: str, role: list[RoleSkill], related: list[RoleSkill], gaps:
             heading.decompose()
     groups: dict[str, tuple[str, list[str]]] = {}
     seen: set[str] = set()
-    gap_text = " ".join(gaps)
-    for skill in [*role, *related]:
+    for skill in skills:
         term = skill.term.strip()
-        if not term or term.lower() in seen or mentions(gap_text, term):
+        if not term or term.lower() in seen:
             continue
         seen.add(term.lower())
         if term == term.lower():
@@ -206,8 +197,10 @@ async def run(state: CaseState, deps: Deps, store: BaseStore) -> dict[str, Any]:
         ask(deps.model, TailoredCv, SYSTEM, context, REASONING_EFFORT),
         timeout=PASS_TIMEOUT_SECONDS,
     )
-    html = PAGE.format(body=set_skills(clean_html(cv.cv_html), cv.role_skills, cv.related_skills, cv.gaps))
-    result = {**cv.model_dump(), "cv_html": html, "pdf": ""}
+    html = PAGE.format(body=set_skills(clean_html(cv.cv_html), cv.role_skills))
+    unproven = [s.term for s in cv.role_skills if s.evidence.strip().lower().startswith("not on cv")]
+    gaps = [*cv.gaps, *(term for term in unproven if term.lower() not in {gap.lower() for gap in cv.gaps})]
+    result = {**cv.model_dump(), "cv_html": html, "pdf": "", "gaps": gaps}
     if deps.chrome:
         pdf = await deps.chrome.render_pdf(html, deps.data_dir / "cvs" / f"{state['case_id']}.pdf")
         result["pdf"] = str(pdf)

@@ -1,6 +1,15 @@
 from langgraph.store.memory import InMemoryStore
 
-from findmeajob.agents.tailor import PAGE, RoleSkill, clean_html, fit_brief, focused_posting, run, set_skills
+from findmeajob.agents.tailor import (
+    PAGE,
+    RoleSkill,
+    TailoredCv,
+    clean_html,
+    fit_brief,
+    focused_posting,
+    run,
+    set_skills,
+)
 from findmeajob.memory import write_profile
 from tests.conftest import POSTING
 
@@ -29,30 +38,24 @@ def test_cv_html_keeps_the_resume_layout():
     assert "Ada Lovelace" in page
 
 
-def test_skills_show_requirement_skills_then_related_ones():
-    role = [
+def test_skills_list_only_what_the_posting_asks_for():
+    skills = [
         RoleSkill(term="Go", category="Languages", evidence="Bujeti"),
         RoleSkill(term="Kafka", category="Messaging & Streaming", evidence="Bujeti"),
         RoleSkill(term="distributed systems", category="Engineering Practices", evidence="Bujeti"),
-        RoleSkill(term="RAG pipelines", category="AI", evidence="none"),
-    ]
-    related = [
-        RoleSkill(term="SQL", category="Languages", evidence="Crenet"),
+        RoleSkill(term="Java", category="Languages", evidence="not on CV"),
         RoleSkill(term="kafka", category="Backend", evidence="duplicate"),
-        RoleSkill(term="RabbitMQ", category="Messaging & Streaming", evidence="Crenet"),
     ]
     html = set_skills(
         '<h2>Work Experience</h2><h2>Skills</h2><div class="skills"><p><strong>Design</strong>'
         "<span>Figma</span></p></div><h2>Education</h2>",
-        role,
-        related,
-        gaps=["Familiarity with RAG pipelines on Google Cloud"],
+        skills,
     )
-    assert "Figma" not in html and "RAG" not in html and "Backend" not in html
+    assert "Figma" not in html and "Backend" not in html
     assert html.count("<h2>Skills</h2>") == 1
     assert html.index("<h2>Skills</h2>") < html.index("<h2>Education</h2>")
-    assert "<strong>Languages</strong><span>Go, SQL</span>" in html
-    assert "<strong>Messaging &amp; Streaming</strong><span>Kafka, RabbitMQ</span>" in html
+    assert "<strong>Languages</strong><span>Go, Java</span>" in html
+    assert "<strong>Messaging &amp; Streaming</strong><span>Kafka</span>" in html
     assert "<strong>Engineering Practices</strong><span>Distributed systems</span>" in html
     assert html.index("Languages") < html.index("Messaging") < html.index("Engineering Practices")
 
@@ -65,6 +68,17 @@ def test_fit_brief_passes_the_judges_ranking():
 async def test_tailor_writes_the_cv_in_one_pass(deps):
     store = InMemoryStore()
     await write_profile(store, {"name": "Ada Lovelace", "skills": ["Node.js"]})
+    deps.model.answers[TailoredCv] = lambda: TailoredCv(
+        requirements=["Node.js", "Kafka"],
+        cv_html="<h1>Ada</h1><h2>Education</h2>",
+        changes=[],
+        gaps=["Kafka"],
+        role_skills=[
+            RoleSkill(term="Node.js", category="Backend", evidence="Acme"),
+            RoleSkill(term="Kafka", category="Messaging & Streaming", evidence="not on CV"),
+            RoleSkill(term="Cassandra", category="Databases", evidence="Not on CV"),
+        ],
+    )
     result = await run(
         {
             "case_id": "c1",
@@ -78,7 +92,8 @@ async def test_tailor_writes_the_cv_in_one_pass(deps):
     assert deps.model.copies == [{"reasoning_effort": "low"}]
     assert "Covered must-haves: Node.js" in deps.model.prompts[0]
     assert result["stage"] == "tailored"
-    assert "<script>" not in result["cv"]["cv_html"]
+    assert "<strong>Databases</strong><span>Cassandra</span>" in result["cv"]["cv_html"]
+    assert result["cv"]["gaps"] == ["Kafka", "Cassandra"]
 
 
 def test_myjobmag_posting_drops_page_navigation():
