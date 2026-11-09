@@ -11,6 +11,7 @@ from findmeajob.memory import profile_context
 from findmeajob.state import CaseState, posting_text
 
 PASS_TIMEOUT_SECONDS = 180
+REASONING_EFFORT = "low"
 
 SYSTEM = (
     "You are Tailor. You write a CV for one job so it passes the employer's ATS and reads well to a recruiter. "
@@ -143,7 +144,7 @@ async def run(state: CaseState, deps: Deps, store: BaseStore) -> dict[str, Any]:
         f"Posting:\n{focused_posting(state['posting'])}"
     )
     cv = await asyncio.wait_for(
-        ask(deps.model, TailoredCv, SYSTEM, context),
+        ask(deps.model, TailoredCv, SYSTEM, context, REASONING_EFFORT),
         timeout=PASS_TIMEOUT_SECONDS,
     )
     html = PAGE.format(body=clean_html(cv.cv_html))

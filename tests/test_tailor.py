@@ -47,6 +47,7 @@ async def test_tailor_writes_the_cv_in_one_pass(deps):
         store,
     )
     assert len(deps.model.prompts) == 1
+    assert deps.model.copies == [{"reasoning_effort": "low"}]
     assert "Covered must-haves: Node.js" in deps.model.prompts[0]
     assert result["stage"] == "tailored"
     assert "<script>" not in result["cv"]["cv_html"]

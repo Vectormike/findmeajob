@@ -27,6 +27,7 @@ class FakeModel:
         self.grounded = True
         self.form_answers: list[FormAnswers] = []
         self.prompts: list[str] = []
+        self.copies: list[dict[str, Any]] = []
         self.answers = {
             FitNote: lambda: FitNote(
                 must_haves_covered=["Node.js"],
@@ -76,6 +77,10 @@ class FakeModel:
                 stories=[Story(title="Acme", text="Moved billing to Kafka.")],
             ),
         }
+
+    def model_copy(self, update: dict[str, Any]) -> "FakeModel":
+        self.copies.append(update)
+        return self
 
     def with_structured_output(self, schema: type) -> "FakeModel._Bound":
         return FakeModel._Bound(self, schema)
