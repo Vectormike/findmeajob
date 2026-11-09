@@ -36,8 +36,11 @@ SYSTEM = (
     "out each concrete skill, tool, technology, or engineering practice it names, such as asynchronous service "
     "design, data processing pipelines, automated testing, or data structures and algorithms. Keep one when the "
     "master CV or profile proves it, even in different words, and write it in the posting's short exact wording. "
-    "Give its best-fitting master CV skill category, or Engineering Practices for a practice no category fits, "
-    "and the evidence. Usually 6-12 terms. Those terms lead their category in the Skills section, followed by "
+    "Give the category for what the skill is, not for the role: a master CV skill category when it truly fits, "
+    "otherwise a standard one such as Frontend, Messaging & Streaming, or Engineering Practices. A frontend "
+    "framework is never Backend. Engineering Practices are named disciplines like Distributed Systems or Automated "
+    "Testing, never adjectives such as resilient or scalable, and never a restatement of a language or tool. "
+    "Give the evidence too. Usually 6-12 terms. Those terms lead their category in the Skills section, followed by "
     "the other relevant supported skills. Never list a gap in role_skills or Skills. "
     "Use current profile contact facts when present and the master CV for any missing header facts. "
     "Aim for a focused two-page CV. Do not mention gaps, requirements, tailoring, or the target company in the CV. "
@@ -155,27 +158,38 @@ def mentions(text: str, term: str) -> bool:
     return re.search(rf"(?<!\w){re.escape(term)}(?!\w)", text, re.IGNORECASE) is not None
 
 
+def skill_items(row: Any) -> list[str]:
+    return [item.strip() for item in row.span.get_text().split(",") if item.strip()]
+
+
 def add_role_skills(html: str, skills: list[RoleSkill], gaps: list[str]) -> str:
     soup = BeautifulSoup(html, "html.parser")
     block = soup.find("div", class_="skills")
     if not block:
         return html
+    rows = {p.strong.get_text().strip().lower(): p for p in block.find_all("p") if p.strong and p.span}
     gap_text = " ".join(gaps)
     for skill in reversed(skills):
         term = skill.term.strip()
-        if not term or mentions(gap_text, term) or mentions(block.get_text(" "), term):
+        if not term or mentions(gap_text, term):
             continue
-        category = skill.category.strip().lower()
-        rows = [p for p in block.find_all("p") if p.strong and p.strong.get_text().strip().lower() == category]
-        row = rows[0] if rows else None
-        if row and row.span:
-            row.span.string = f"{term}, {row.span.get_text()}" if row.span.get_text().strip() else term
-            continue
-        row = soup.new_tag("p")
-        label, items = soup.new_tag("strong"), soup.new_tag("span")
-        label.string, items.string = skill.category.strip() or "Skills", term
-        row.extend([label, items])
-        block.append(row)
+        if term == term.lower():
+            term = term[0].upper() + term[1:]
+        for row in rows.values():
+            row.span.string = ", ".join(item for item in skill_items(row) if item.lower() != term.lower())
+        category = skill.category.strip() or "Engineering Practices"
+        row = rows.get(category.lower())
+        if not row:
+            row = soup.new_tag("p")
+            label, items = soup.new_tag("strong"), soup.new_tag("span")
+            label.string = category
+            row.extend([label, items])
+            block.append(row)
+            rows[category.lower()] = row
+        row.span.string = ", ".join([term, *skill_items(row)])
+    for row in rows.values():
+        if not skill_items(row):
+            row.decompose()
     return str(soup)
 
 

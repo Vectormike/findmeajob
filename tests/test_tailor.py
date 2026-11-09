@@ -33,21 +33,25 @@ def test_role_skills_lead_the_skills_section():
     skills = [
         RoleSkill(term="Kafka", category="Backend", evidence="Bujeti"),
         RoleSkill(term="Go", category="Languages", evidence="already listed"),
-        RoleSkill(term="Automated testing", category="Practices", evidence="Cyberspace CI"),
+        RoleSkill(term="distributed systems", category="Engineering Practices", evidence="Bujeti"),
         RoleSkill(term="RAG pipelines", category="AI", evidence="none"),
         RoleSkill(term="SQL", category="Databases", evidence="Crenet"),
+        RoleSkill(term="React", category="Frontend", evidence="Hotels.ng"),
     ]
     html = add_role_skills(
         '<div class="skills"><p><strong>Languages</strong><span>Go</span></p>'
-        "<p><strong>Backend</strong><span>Node.js</span></p>"
-        "<p><strong>Databases</strong><span>MySQL, MongoDB</span></p></div>",
+        "<p><strong>Backend</strong><span>React, Node.js</span></p>"
+        "<p><strong>Databases</strong><span>MySQL, MongoDB</span></p>"
+        "<p><strong>UI</strong><span>React</span></p></div>",
         skills,
         gaps=["Familiarity with RAG pipelines on Google Cloud"],
     )
     assert "<span>Kafka, Node.js</span>" in html
     assert "<span>Go</span>" in html
     assert "<span>SQL, MySQL, MongoDB</span>" in html
-    assert "<strong>Practices</strong><span>Automated testing</span>" in html
+    assert "<strong>Frontend</strong><span>React</span>" in html
+    assert "<strong>Engineering Practices</strong><span>Distributed systems</span>" in html
+    assert html.count("React") == 1 and "UI" not in html
     assert "RAG" not in html
 
 
