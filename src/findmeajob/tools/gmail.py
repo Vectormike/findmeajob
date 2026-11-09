@@ -81,5 +81,9 @@ class Gmail:
     async def read_mail(self, after_epoch: int) -> list[dict[str, Any]]:
         return await asyncio.to_thread(self._read, after_epoch)
 
+    async def healthcheck(self) -> str:
+        profile = await asyncio.to_thread(self._service.users().getProfile(userId="me").execute)
+        return profile.get("emailAddress", "connected")
+
     async def send_mail(self, to: str, subject: str, body: str, thread_id: str, in_reply_to: str) -> str:
         return await asyncio.to_thread(self._send, to, subject, body, thread_id, in_reply_to)

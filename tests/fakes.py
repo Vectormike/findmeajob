@@ -8,7 +8,7 @@ from findmeajob.agents.chaser import Draft
 from findmeajob.agents.clerk import FieldAnswer, FormAnswers, SalaryRange
 from findmeajob.agents.courier import MailRead
 from findmeajob.agents.critic import Debrief
-from findmeajob.agents.judge import FitNote
+from findmeajob.agents.judge import FitArea, FitNote
 from findmeajob.agents.tailor import CvChange, TailoredCv
 from findmeajob.memory import Story
 from findmeajob.profile_from_cv import CvFacts
@@ -27,10 +27,11 @@ class FakeModel:
         self.grounded = True
         self.form_answers: list[FormAnswers] = []
         self.prompts: list[str] = []
+        self.copies: list[dict[str, Any]] = []
         self.answers = {
             FitNote: lambda: FitNote(
-                must_haves_covered=["Node.js"],
-                must_haves_missing=[],
+                technical=FitArea(verdict="Strong on the stack.", covered=["Node.js"], missing=[]),
+                behavioural=FitArea(verdict="No mentoring shown.", covered=["Ownership"], missing=["Mentoring"]),
                 seniority="match",
                 location_and_pay="ok",
                 red_flags=[],
@@ -76,6 +77,10 @@ class FakeModel:
                 stories=[Story(title="Acme", text="Moved billing to Kafka.")],
             ),
         }
+
+    def model_copy(self, update: dict[str, Any]) -> "FakeModel":
+        self.copies.append(update)
+        return self
 
     def with_structured_output(self, schema: type) -> "FakeModel._Bound":
         return FakeModel._Bound(self, schema)
@@ -147,6 +152,9 @@ class FakeChrome:
     async def render_pdf(self, html: str, path: Path) -> Path:
         return path
 
+    async def healthcheck(self) -> None:
+        return None
+
 
 class FakeGmail:
     def __init__(self) -> None:
@@ -156,6 +164,9 @@ class FakeGmail:
     async def send_mail(self, to: str, subject: str, body: str, thread_id: str, in_reply_to: str) -> str:
         self.sent.append((to, subject, body))
         return "sent-1"
+
+    async def healthcheck(self) -> str:
+        return "ada@example.com"
 
     async def read_mail(self, after_epoch: int) -> list[dict[str, Any]]:
         return self.inbox

@@ -111,6 +111,15 @@ async def retry(request: Request, case_id: str) -> dict[str, str]:
     return {"status": "running"}
 
 
+@router.post("/cases/{case_id}/retry/{agent}", status_code=202)
+async def retry_agent(request: Request, case_id: str, agent: str) -> dict[str, str]:
+    workflow = workflow_of(request)
+    if agent not in await workflow.retryable(case_id):
+        raise HTTPException(409, f"{agent} can't be retried on this case right now.")
+    background(request, workflow.rerun(case_id, agent))
+    return {"status": "running"}
+
+
 @router.get("/cases/{case_id}/cv")
 async def cv_html(request: Request, case_id: str) -> HTMLResponse:
     cv = (await workflow_of(request).case(case_id)).get("cv")

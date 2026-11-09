@@ -41,7 +41,7 @@
 				<span class="small pulse">{agent(name).title} {agent(name).doing}</span>
 			</a>
 		{:else}
-			<p class="small muted">agents pull up here when they're on a case.</p>
+			<p class="small muted">Ready when you are.</p>
 		{/each}
 	</div>
 </aside>
@@ -101,7 +101,7 @@
 	}
 	.live {
 		margin-top: auto;
-		padding: 12px;
+		padding: 10px;
 		display: flex;
 		flex-direction: column;
 		gap: 8px;

@@ -12,6 +12,8 @@ from findmeajob.graph import build_graph
 from findmeajob.memory import CASES, index_case, now
 
 log = logging.getLogger(__name__)
+RETRYABLE = ("judge", "tailor", "clerk", "courier", "brief", "critic", "archivist", "chaser")
+BEFORE_APPLYING = ("judge", "tailor", "clerk")
 
 
 class Workflow:
@@ -25,9 +27,9 @@ class Workflow:
     def _config(case_id: str) -> dict[str, Any]:
         return {"configurable": {"thread_id": case_id}}
 
-    async def _invoke(self, case_id: str, payload: Any) -> None:
+    async def _invoke(self, case_id: str, payload: Any, config: dict[str, Any] | None = None) -> None:
         try:
-            await self.graph.ainvoke(payload, self._config(case_id))
+            await self.graph.ainvoke(payload, config or self._config(case_id))
         except Exception as error:
             log.exception("Case %s failed", case_id)
             item = await self.store.aget(CASES, case_id)
@@ -63,6 +65,35 @@ class Workflow:
             snapshot = await self.graph.aget_state(self._config(case_id))
             if snapshot.next and not snapshot.interrupts:
                 await self._invoke(case_id, None)
+
+    async def _retry_points(self, case_id: str) -> dict[str, dict[str, Any]]:
+        snapshot = await self.graph.aget_state(self._config(case_id))
+        application = snapshot.values.get("application") or {}
+        applied = bool(application) and not application.get("blocked")
+        points: dict[str, dict[str, Any]] = {}
+        first = True
+        while snapshot:
+            step = snapshot.next[0] if snapshot.next else ""
+            if step == "wait" and not first:
+                break
+            if step in RETRYABLE and step not in points and not (applied and step in BEFORE_APPLYING):
+                points[step] = snapshot.config
+            if not snapshot.parent_config:
+                break
+            snapshot = await self.graph.aget_state(snapshot.parent_config)
+            first = False
+        return points
+
+    async def retryable(self, case_id: str) -> list[str]:
+        return list(await self._retry_points(case_id))
+
+    async def rerun(self, case_id: str, agent: str) -> bool:
+        async with self._locks[case_id]:
+            point = (await self._retry_points(case_id)).get(agent)
+            if not point:
+                return False
+            await self._invoke(case_id, None, point)
+        return True
 
     async def case(self, case_id: str) -> dict[str, Any]:
         snapshot = await self.graph.aget_state(self._config(case_id))

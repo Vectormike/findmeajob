@@ -28,9 +28,14 @@ def test_api_lists_cases_and_details(deps, tmp_path):
         assert [case["company"] for case in inbox["cases"]] == ["Acme"]
         assert inbox["counts"]["applied"] == 1
         detail = http.get("/api/cases/c1").json()
-        assert detail["case"]["fit"]["reason"] == "Covers the stack."
+        fit = detail["case"]["fit"]
+        assert fit["reason"] == "Covers the stack."
+        assert fit["technical"]["covered"] == ["Node.js"] and fit["behavioural"]["missing"] == ["Mentoring"]
+        assert fit["must_haves_covered"] == ["Node.js", "Ownership"] and fit["must_haves_missing"] == ["Mentoring"]
         assert "cv_html" not in detail["case"]["cv"] and "pdf" not in detail["case"]["cv"]
         assert detail["waiting"] is True
+        assert detail["retryable"] == []
+        assert http.post("/api/cases/c1/retry/tailor").status_code == 409
         assert http.get("/api/cases/c1/cv").status_code == 200
         pdf = Path(tmp_path, "cvs", "c1.pdf")
         pdf.parent.mkdir(parents=True)
@@ -41,6 +46,24 @@ def test_api_lists_cases_and_details(deps, tmp_path):
         assert 'attachment; filename="cv-c1.pdf"' == download.headers["content-disposition"]
         agents = {card["name"]: card for card in http.get("/api/agents").json()}
         assert agents["clerk"]["last"]["key"] == "c1"
+
+def test_integrations_have_working_health_checks(deps, tmp_path):
+    with client(deps, tmp_path) as http:
+        cards = {card["key"]: card for card in http.get("/api/integrations").json()}
+        assert all(card["active"] for card in cards.values())
+        for key in ("gmail", "readai", "chrome", "xai"):
+            response = http.post(f"/api/integrations/{key}/test")
+            assert response.status_code == 200, response.text
+        refreshed = {card["key"]: card for card in http.get("/api/integrations").json()}
+        assert all(card["status"]["ok"] for card in refreshed.values())
+
+
+def test_gmail_connect_explains_missing_oauth_file(deps, tmp_path):
+    deps.gmail = None
+    with client(deps, tmp_path) as http:
+        response = http.post("/api/integrations/gmail/connect")
+        assert response.status_code == 409
+        assert "Google OAuth client file" in response.json()["detail"]
 
 
 def test_profile_saves(deps, tmp_path):

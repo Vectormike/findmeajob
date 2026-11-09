@@ -11,6 +11,7 @@ from findmeajob.events import broker
 from findmeajob.memory import LESSONS, Profile, list_values, read_profile, set_status, write_profile
 from findmeajob.profile_from_cv import merge_facts, read_cv
 from findmeajob.tools.documents import extract_text
+from findmeajob.tools.gmail import Gmail, authorize
 from findmeajob.tools.readai import read_meeting_notes
 from findmeajob.web.common import AGENTS, all_cases, background, statuses, workflow_of
 
@@ -94,8 +95,88 @@ async def decide_memory(request: Request, key: str, decision: Literal["accepted"
 
 @router.get("/api/integrations")
 async def integrations_view(request: Request) -> list[dict[str, Any]]:
-    found = await statuses(workflow_of(request))
-    return [{**card, "status": found.get(card["key"])} for card in INTEGRATIONS]
+    workflow = workflow_of(request)
+    settings = request.app.state.settings
+    found = await statuses(workflow)
+    configured = {
+        "gmail": workflow.deps.gmail is not None or settings.gmail_credentials_file.exists(),
+        "readai": bool(settings.readai_webhook_secret),
+        "chrome": workflow.deps.chrome is not None,
+        "xai": workflow.deps.model is not None,
+    }
+    active = {
+        "gmail": workflow.deps.gmail is not None,
+        "readai": bool(settings.readai_webhook_secret),
+        "chrome": workflow.deps.chrome is not None,
+        "xai": workflow.deps.model is not None,
+    }
+    return [
+        {
+            **card,
+            "configured": configured[card["key"]],
+            "active": active[card["key"]],
+            "status": found.get(card["key"]),
+        }
+        for card in INTEGRATIONS
+    ]
+
+
+@router.post("/api/integrations/{key}/test")
+async def test_integration(request: Request, key: str) -> dict[str, Any]:
+    workflow = workflow_of(request)
+    settings = request.app.state.settings
+    try:
+        if key == "gmail":
+            if not workflow.deps.gmail:
+                raise RuntimeError("Gmail isn't connected yet.")
+            detail = f"Connected as {await workflow.deps.gmail.healthcheck()}"
+        elif key == "readai":
+            if not settings.readai_webhook_secret:
+                raise RuntimeError("READAI_WEBHOOK_SECRET is missing.")
+            detail = "Webhook is configured and ready for Read AI."
+        elif key == "chrome":
+            if not workflow.deps.chrome:
+                raise RuntimeError("Clerk's browser isn't available.")
+            await workflow.deps.chrome.healthcheck()
+            detail = "Headless Clerk browser passed its check."
+        elif key == "xai":
+            if not workflow.deps.model:
+                raise RuntimeError("XAI_API_KEY is missing.")
+            detail = f"{settings.xai_model} is configured."
+        else:
+            raise HTTPException(404, "that integration doesn't exist.")
+    except HTTPException:
+        raise
+    except Exception as error:
+        await set_status(workflow.store, key, False, str(error)[:300])
+        raise HTTPException(409, str(error)) from error
+    await set_status(workflow.store, key, True, detail)
+    return {"status": "connected", "detail": detail}
+
+
+@router.post("/api/integrations/gmail/connect")
+async def connect_gmail(request: Request) -> dict[str, str]:
+    workflow = workflow_of(request)
+    settings = request.app.state.settings
+    if workflow.deps.gmail:
+        return {"status": "connected", "detail": f"Connected as {await workflow.deps.gmail.healthcheck()}"}
+    if not settings.gmail_credentials_file.exists():
+        detail = f"Add your Google OAuth client file at {settings.gmail_credentials_file} first."
+        await set_status(workflow.store, "gmail", False, detail)
+        raise HTTPException(409, detail)
+    try:
+        await asyncio.to_thread(authorize, settings.gmail_credentials_file, settings.gmail_token_file)
+        workflow.deps.gmail = Gmail(settings.gmail_token_file)
+        email = await workflow.deps.gmail.healthcheck()
+    except Exception as error:
+        await set_status(workflow.store, "gmail", False, f"Gmail connection failed: {error}"[:300])
+        raise HTTPException(409, f"Gmail connection failed: {error}") from error
+    await set_status(workflow.store, "gmail", True, f"Connected as {email}")
+    if not request.app.state.gmail_poller:
+        request.app.state.gmail_poller = asyncio.create_task(
+            inbox.poll_forever(workflow, settings.courier_poll_seconds)
+        )
+    return {"status": "connected", "detail": f"Connected as {email}"}
 
 
 @router.get("/api/events", response_class=EventSourceResponse)

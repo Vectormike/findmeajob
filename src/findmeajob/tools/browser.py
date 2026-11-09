@@ -177,13 +177,18 @@ class Chrome:
         self._pdf_browser: Any = None
 
     async def _start(self) -> None:
-        if self._playwright:
-            return
-        self._playwright = await async_playwright().start()
-        self._context = await self._playwright.chromium.launch_persistent_context(
-            str(self.profile_dir), channel="chrome", headless=self.headless
-        )
-        self._pdf_browser = await self._playwright.chromium.launch(channel="chrome", headless=True)
+        if not self._playwright:
+            self._playwright = await async_playwright().start()
+        if not self._context:
+            self._context = await self._playwright.chromium.launch_persistent_context(
+                str(self.profile_dir), channel="chrome", headless=self.headless
+            )
+
+    async def _start_pdf(self) -> None:
+        if not self._playwright:
+            self._playwright = await async_playwright().start()
+        if not self._pdf_browser:
+            self._pdf_browser = await self._playwright.chromium.launch(channel="chrome", headless=True)
 
     @asynccontextmanager
     async def fill_form(self, url: str) -> AsyncIterator[FormSession]:
@@ -199,7 +204,7 @@ class Chrome:
                     await open_page.close()
 
     async def render_pdf(self, html: str, path: Path) -> Path:
-        await self._start()
+        await self._start_pdf()
         path.parent.mkdir(parents=True, exist_ok=True)
         page = await self._pdf_browser.new_page()
         await page.set_content(html, wait_until="load")
@@ -209,9 +214,19 @@ class Chrome:
         await page.close()
         return path
 
+    async def healthcheck(self) -> None:
+        await self._start()
+        page = await self._context.new_page()
+        await page.set_content("<title>Clerk ready</title>")
+        await page.close()
+
     async def close(self) -> None:
-        if self._playwright:
+        if self._context:
             await self._context.close()
+            self._context = None
+        if self._pdf_browser:
             await self._pdf_browser.close()
+            self._pdf_browser = None
+        if self._playwright:
             await self._playwright.stop()
             self._playwright = None

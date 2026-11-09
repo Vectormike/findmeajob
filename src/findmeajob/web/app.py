@@ -44,9 +44,11 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
             await set_status(
                 store, "xai", ready, settings.xai_model if ready else "no key. the agents can't think without it."
             )
+            await set_status(store, "chrome", run_deps.chrome is not None, "headless Clerk browser ready")
             if not deps and settings.gmail_token_file.exists():
                 try:
                     run_deps.gmail = Gmail(settings.gmail_token_file)
+                    await set_status(store, "gmail", True, "Gmail connected")
                 except Exception as error:
                     await set_status(store, "gmail", False, f"gmail said no: {error}"[:300])
             workflow = Workflow(run_deps, checkpointer, store)
@@ -56,11 +58,12 @@ def create_app(settings: Settings | None = None, deps: Deps | None = None) -> Fa
             app.state.settings = settings
             app.state.workflow = workflow
             app.state.tasks = set()
+            app.state.gmail_poller = poller
             yield
-            if poller:
-                poller.cancel()
+            if app.state.gmail_poller:
+                app.state.gmail_poller.cancel()
                 with suppress(asyncio.CancelledError):
-                    await poller
+                    await app.state.gmail_poller
             if run_deps.chrome and not deps:
                 await run_deps.chrome.close()
 

@@ -1,11 +1,17 @@
 <script lang="ts">
-	import { Download, FileText, Sparkles } from '@lucide/svelte';
+	import { Download, FileText, Sparkles, X } from '@lucide/svelte';
 	import { agent } from '#lib/agents.ts';
 	import { api, type CaseDetail } from '#lib/api.ts';
 	import { ago, count, label } from '#lib/format.ts';
+	import { prefersReducedMotion } from 'svelte/motion';
+	import { fly } from 'svelte/transition';
 	import Badge from '../Badge.svelte';
 
-	let { detail, onchange }: { detail: CaseDetail; onchange: (next: CaseDetail) => void } = $props();
+	let {
+		detail,
+		onchange,
+		onclose
+	}: { detail: CaseDetail; onchange: (next: CaseDetail) => void; onclose: () => void } = $props();
 	const c = $derived(detail.case);
 	let tab = $state<'details' | 'debrief'>('details');
 
@@ -34,10 +40,13 @@
 	}
 </script>
 
-<aside class="col">
-	<div class="tabs">
-		<button class:on={tab === 'details'} onclick={() => (tab = 'details')}>Case details</button>
-		<button class:on={tab === 'debrief'} onclick={() => (tab = 'debrief')}>Debrief {c.debriefs.length ? `(${c.debriefs.length})` : ''}</button>
+<aside class="col" transition:fly={{ x: 40, duration: prefersReducedMotion.current ? 0 : 220 }}>
+	<div class="drawer-head row">
+		<div class="tabs">
+			<button class:on={tab === 'details'} onclick={() => (tab = 'details')}>Case details</button>
+			<button class:on={tab === 'debrief'} onclick={() => (tab = 'debrief')}>Debrief {c.debriefs.length ? `(${c.debriefs.length})` : ''}</button>
+		</div>
+		<button class="icon-btn" onclick={onclose} title="Close details"><X size={15} /></button>
 	</div>
 
 	{#if tab === 'details'}
@@ -78,12 +87,18 @@
 		{/if}
 
 		{#if c.fit}
-			<p class="section-label">Judge's insight</p>
+			<p class="section-label">Judge's verdict</p>
 			<div class="card box">
-				<p class="row"><Sparkles size={14} /> <b>Fit note</b></p>
-				<p class="small">{c.fit.reason}</p>
-				{#if c.fit.must_haves_covered?.length}<p class="small muted">Covers: {c.fit.must_haves_covered.join(', ')}</p>{/if}
-				<p class="small row">Verdict: <Badge value={c.fit.recommendation === 'skip' ? 'rejected' : 'applied'} text={label(c.fit.recommendation)} /></p>
+				<div class="row between">
+					<span class="row"><Sparkles size={14} /> <b>Fit</b></span>
+					<Badge value={c.fit.recommendation === 'skip' ? 'rejected' : 'applied'} text={label(c.fit.recommendation)} />
+				</div>
+				<div class="tally">
+					<span><b>{c.fit.must_haves_covered?.length ?? 0}</b> covered</span>
+					<span class:miss={c.fit.must_haves_missing?.length}><b>{c.fit.must_haves_missing?.length ?? 0}</b> missing</span>
+					<span class:miss={c.fit.red_flags?.length}><b>{c.fit.red_flags?.length ?? 0}</b> red flags</span>
+				</div>
+				<p class="small faint">Full reasoning is in the thread.</p>
 			</div>
 		{/if}
 
@@ -112,6 +127,7 @@
 	}
 	.tabs {
 		display: flex;
+		flex: 1;
 		gap: 4px;
 		padding: 3px;
 		background: var(--soft);
@@ -131,6 +147,12 @@
 		color: var(--text);
 		font-weight: 500;
 		box-shadow: 0 1px 2px rgb(16 24 40 / 8%);
+	}
+	.drawer-head {
+		align-items: stretch;
+	}
+	.drawer-head .icon-btn {
+		height: auto;
 	}
 	dl {
 		display: grid;
@@ -166,5 +188,26 @@
 	.close {
 		margin-top: 16px;
 		justify-content: center;
+	}
+	.tally {
+		display: grid;
+		grid-template-columns: repeat(3, 1fr);
+		gap: 6px;
+	}
+	.tally span {
+		padding: 6px 8px;
+		border-radius: 8px;
+		background: var(--soft);
+		font-size: 12px;
+		color: var(--muted);
+		text-align: center;
+	}
+	.tally b {
+		display: block;
+		font-size: 16px;
+		color: var(--text);
+	}
+	.tally .miss b {
+		color: var(--red);
 	}
 </style>
