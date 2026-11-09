@@ -1,4 +1,8 @@
-from findmeajob.agents.tailor import PAGE, clean_html, focused_posting
+from langgraph.store.memory import InMemoryStore
+
+from findmeajob.agents.tailor import PAGE, clean_html, fit_brief, focused_posting, run
+from findmeajob.memory import write_profile
+from tests.conftest import POSTING
 
 SAMPLE = """
 "
@@ -23,6 +27,29 @@ def test_cv_html_keeps_the_resume_layout():
     page = PAGE.format(body=html)
     assert "grid-template-columns: 1.25fr 1fr auto" in page
     assert "Ada Lovelace" in page
+
+
+def test_fit_brief_passes_the_judges_ranking():
+    brief = fit_brief({"recommendation": "apply", "must_haves_covered": ["Node.js"], "must_haves_missing": ["Kafka"]})
+    assert "apply" in brief and "Node.js" in brief and "Kafka" in brief
+
+
+async def test_tailor_writes_the_cv_in_one_pass(deps):
+    store = InMemoryStore()
+    await write_profile(store, {"name": "Ada Lovelace", "skills": ["Node.js"]})
+    result = await run(
+        {
+            "case_id": "c1",
+            "posting": POSTING,
+            "fit": {"recommendation": "apply", "must_haves_covered": ["Node.js"], "must_haves_missing": ["Kafka"]},
+        },
+        deps,
+        store,
+    )
+    assert len(deps.model.prompts) == 1
+    assert "Covered must-haves: Node.js" in deps.model.prompts[0]
+    assert result["stage"] == "tailored"
+    assert "<script>" not in result["cv"]["cv_html"]
 
 
 def test_myjobmag_posting_drops_page_navigation():

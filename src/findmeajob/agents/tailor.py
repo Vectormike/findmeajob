@@ -1,5 +1,4 @@
 import asyncio
-import logging
 from typing import Any, Literal
 
 from bs4 import BeautifulSoup
@@ -11,13 +10,13 @@ from findmeajob.llm import ask
 from findmeajob.memory import profile_context
 from findmeajob.state import CaseState, posting_text
 
-log = logging.getLogger(__name__)
 PASS_TIMEOUT_SECONDS = 180
 
 SYSTEM = (
     "You are Tailor. You write a CV for one job so it passes the employer's ATS and reads well to a recruiter. "
-    "This must be materially tailored, not the master CV with reordered skills. First rank the posting's must-have "
-    "requirements, then make the strongest truthful evidence for those requirements easy to find. "
+    "This must be materially tailored, not the master CV with reordered skills. Judge already ranked the must-haves. "
+    "Use that ranking. Do not re-analyze the posting. Make the strongest truthful evidence for the covered "
+    "requirements easy to find. "
     "You may rewrite bullets for clarity and relevance, but every employer, title, date, skill, event, metric, "
     "tool, and outcome must be grounded in the master CV or profile. Never merge facts from different employers. "
     "Mirror the posting's exact terms only when the candidate's evidence genuinely supports them. "
@@ -47,18 +46,6 @@ SYSTEM = (
     '<span class="when">dates</span></p>\n'
     "One role block per job, newest first. Title, company, and dates stay on the role-line, never in the bullets. "
     "Keep the master CV's skill category names. One category per skills paragraph."
-)
-
-REVIEW = (
-    "You are the final ATS and truthfulness reviewer for a tailored CV. Return a corrected TailoredCv. "
-    "Compare every posting requirement against the profile and master CV, then inspect the draft. "
-    "For every supported requirement, ensure the CV contains the posting's exact term or an unmistakable equivalent "
-    "and the strongest grounded evidence. Put that evidence in the summary, skills, and relevant work bullets—not "
-    "only in the changes list. Restore strong relevant evidence the draft missed and remove weak irrelevant bullets. "
-    "A reordered skill alone is not enough when work evidence exists. Keep roles in reverse chronology and facts "
-    "attached to their real employer. Preserve every source metric exactly. Never invent or inflate experience, "
-    "skills, titles, dates, tools, metrics, or outcomes. Unsupported requirements belong in gaps and nowhere in the "
-    "CV. Keep the required HTML structure and target a focused two-page CV."
 )
 
 ALLOWED_TAGS = {"h1", "h2", "p", "ul", "ol", "li", "strong", "em", "a", "br", "div", "span"}
@@ -91,6 +78,15 @@ class TailoredCv(BaseModel):
     cv_html: str
     changes: list[CvChange]
     gaps: list[str] = Field(description="Requirements found in neither the master CV nor the profile")
+
+
+def fit_brief(fit: dict[str, Any]) -> str:
+    covered = ", ".join(fit.get("must_haves_covered") or []) or "none"
+    missing = ", ".join(fit.get("must_haves_missing") or []) or "none"
+    return (
+        f"Judge ranking: {fit.get('recommendation', 'unknown')}. "
+        f"Covered must-haves: {covered}. Missing must-haves, already gaps unless the profile shows them: {missing}."
+    )
 
 
 def focused_posting(posting: dict[str, Any]) -> str:
@@ -141,24 +137,15 @@ def clean_html(html: str) -> str:
 
 
 async def run(state: CaseState, deps: Deps, store: BaseStore) -> dict[str, Any]:
-    context = f"Profile and master CV:\n{await profile_context(store)}\n\nPosting:\n{focused_posting(state['posting'])}"
-    draft = await asyncio.wait_for(
+    context = (
+        f"Profile and master CV:\n{await profile_context(store)}\n\n"
+        f"{fit_brief(state.get('fit') or {})}\n\n"
+        f"Posting:\n{focused_posting(state['posting'])}"
+    )
+    cv = await asyncio.wait_for(
         ask(deps.model, TailoredCv, SYSTEM, context),
         timeout=PASS_TIMEOUT_SECONDS,
     )
-    try:
-        cv = await asyncio.wait_for(
-            ask(
-                deps.model,
-                TailoredCv,
-                REVIEW,
-                f"{context}\n\nDraft to audit and correct:\n{draft.model_dump_json(indent=2)}",
-            ),
-            timeout=PASS_TIMEOUT_SECONDS,
-        )
-    except TimeoutError:
-        log.warning("Tailor review timed out; using the grounded first pass")
-        cv = draft
     html = PAGE.format(body=clean_html(cv.cv_html))
     result = {**cv.model_dump(), "cv_html": html, "pdf": ""}
     if deps.chrome:
