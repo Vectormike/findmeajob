@@ -1,6 +1,6 @@
 from langgraph.store.memory import InMemoryStore
 
-from findmeajob.agents.tailor import PAGE, clean_html, fit_brief, focused_posting, run
+from findmeajob.agents.tailor import PAGE, RoleSkill, add_role_skills, clean_html, fit_brief, focused_posting, run
 from findmeajob.memory import write_profile
 from tests.conftest import POSTING
 
@@ -27,6 +27,28 @@ def test_cv_html_keeps_the_resume_layout():
     page = PAGE.format(body=html)
     assert "grid-template-columns: 1.25fr 1fr auto" in page
     assert "Ada Lovelace" in page
+
+
+def test_role_skills_lead_the_skills_section():
+    skills = [
+        RoleSkill(term="Kafka", category="Backend", evidence="Bujeti"),
+        RoleSkill(term="Go", category="Languages", evidence="already listed"),
+        RoleSkill(term="Automated testing", category="Practices", evidence="Cyberspace CI"),
+        RoleSkill(term="RAG pipelines", category="AI", evidence="none"),
+        RoleSkill(term="SQL", category="Databases", evidence="Crenet"),
+    ]
+    html = add_role_skills(
+        '<div class="skills"><p><strong>Languages</strong><span>Go</span></p>'
+        "<p><strong>Backend</strong><span>Node.js</span></p>"
+        "<p><strong>Databases</strong><span>MySQL, MongoDB</span></p></div>",
+        skills,
+        gaps=["Familiarity with RAG pipelines on Google Cloud"],
+    )
+    assert "<span>Kafka, Node.js</span>" in html
+    assert "<span>Go</span>" in html
+    assert "<span>SQL, MySQL, MongoDB</span>" in html
+    assert "<strong>Practices</strong><span>Automated testing</span>" in html
+    assert "RAG" not in html
 
 
 def test_fit_brief_passes_the_judges_ranking():

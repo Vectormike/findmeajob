@@ -1,4 +1,5 @@
 import asyncio
+import re
 from typing import Any, Literal
 
 from bs4 import BeautifulSoup
@@ -31,7 +32,13 @@ SYSTEM = (
     "Keep every role in reverse chronology. Within each role, select 1-5 relevant bullets and order the strongest "
     "evidence first. Front-load the job's supported keywords and retain the original facts and metrics. "
     "Do not keep an irrelevant bullet merely to fill space. Ensure every supported must-have appears in the "
-    "summary, skills, or a work bullet. Put job-relevant, supported skills first within their existing categories. "
+    "summary, skills, or a work bullet. Fill role_skills by going through every posting requirement and pulling "
+    "out each concrete skill, tool, technology, or engineering practice it names, such as asynchronous service "
+    "design, data processing pipelines, automated testing, or data structures and algorithms. Keep one when the "
+    "master CV or profile proves it, even in different words, and write it in the posting's short exact wording. "
+    "Give its best-fitting master CV skill category, or Engineering Practices for a practice no category fits, "
+    "and the evidence. Usually 6-12 terms. Those terms lead their category in the Skills section, followed by "
+    "the other relevant supported skills. Never list a gap in role_skills or Skills. "
     "Use current profile contact facts when present and the master CV for any missing header facts. "
     "Aim for a focused two-page CV. Do not mention gaps, requirements, tailoring, or the target company in the CV. "
     "cv_html must use this shape and nothing else. No markdown fences, no wrapping quotes. "
@@ -74,11 +81,18 @@ class CvChange(BaseModel):
     source: Literal["master_cv", "profile"]
 
 
+class RoleSkill(BaseModel):
+    term: str = Field(description="The posting's exact wording for a skill, tool, technology, or practice")
+    category: str = Field(description="The master CV skill category it belongs to")
+    evidence: str = Field(description="Where the master CV or profile proves it")
+
+
 class TailoredCv(BaseModel):
     requirements: list[str] = Field(description="Requirements pulled from the posting")
     cv_html: str
     changes: list[CvChange]
     gaps: list[str] = Field(description="Requirements found in neither the master CV nor the profile")
+    role_skills: list[RoleSkill] = Field(default=[], description="Posting skills the candidate's evidence proves")
 
 
 def fit_brief(fit: dict[str, Any]) -> str:
@@ -137,6 +151,34 @@ def clean_html(html: str) -> str:
     return "".join(str(child) for child in list(root.children) if str(child).strip())
 
 
+def mentions(text: str, term: str) -> bool:
+    return re.search(rf"(?<!\w){re.escape(term)}(?!\w)", text, re.IGNORECASE) is not None
+
+
+def add_role_skills(html: str, skills: list[RoleSkill], gaps: list[str]) -> str:
+    soup = BeautifulSoup(html, "html.parser")
+    block = soup.find("div", class_="skills")
+    if not block:
+        return html
+    gap_text = " ".join(gaps)
+    for skill in reversed(skills):
+        term = skill.term.strip()
+        if not term or mentions(gap_text, term) or mentions(block.get_text(" "), term):
+            continue
+        category = skill.category.strip().lower()
+        rows = [p for p in block.find_all("p") if p.strong and p.strong.get_text().strip().lower() == category]
+        row = rows[0] if rows else None
+        if row and row.span:
+            row.span.string = f"{term}, {row.span.get_text()}" if row.span.get_text().strip() else term
+            continue
+        row = soup.new_tag("p")
+        label, items = soup.new_tag("strong"), soup.new_tag("span")
+        label.string, items.string = skill.category.strip() or "Skills", term
+        row.extend([label, items])
+        block.append(row)
+    return str(soup)
+
+
 async def run(state: CaseState, deps: Deps, store: BaseStore) -> dict[str, Any]:
     context = (
         f"Profile and master CV:\n{await profile_context(store)}\n\n"
@@ -147,7 +189,7 @@ async def run(state: CaseState, deps: Deps, store: BaseStore) -> dict[str, Any]:
         ask(deps.model, TailoredCv, SYSTEM, context, REASONING_EFFORT),
         timeout=PASS_TIMEOUT_SECONDS,
     )
-    html = PAGE.format(body=clean_html(cv.cv_html))
+    html = PAGE.format(body=add_role_skills(clean_html(cv.cv_html), cv.role_skills, cv.gaps))
     result = {**cv.model_dump(), "cv_html": html, "pdf": ""}
     if deps.chrome:
         pdf = await deps.chrome.render_pdf(html, deps.data_dir / "cvs" / f"{state['case_id']}.pdf")
