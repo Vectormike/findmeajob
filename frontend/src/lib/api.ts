@@ -19,7 +19,14 @@ export type CaseRow = {
 	last_agent: string;
 	updated_at: string;
 	error?: string;
+	captcha?: boolean;
 };
+
+export type LiveAction =
+	| { kind: 'click'; x: number; y: number }
+	| { kind: 'type'; text: string }
+	| { kind: 'key'; key: string }
+	| { kind: 'scroll'; dy: number };
 
 export type Mail = {
 	id: string;
@@ -100,7 +107,7 @@ export type Case = {
 	sent: { to: string; subject: string; body: string; at: string }[];
 };
 
-export type CaseDetail = { case: Case; index: CaseRow; waiting: boolean; retryable: string[] };
+export type CaseDetail = { case: Case; index: CaseRow; waiting: boolean; retryable: string[]; captcha: boolean };
 
 export type Unmatched = {
 	key: string;
@@ -173,6 +180,7 @@ export const api = {
 	close: (id: string) => request<CaseDetail>('POST', `/cases/${id}/close`),
 	retry: (id: string) => request('POST', `/cases/${id}/retry`),
 	retryAgent: (id: string, agent: string) => request('POST', `/cases/${id}/retry/${agent}`),
+	liveAct: (id: string, action: LiveAction) => request('POST', `/cases/${id}/live`, action),
 	assign: (key: string, caseId: string) => request('POST', `/unmatched/${key}/assign`, { case_id: caseId }),
 	dismiss: (key: string) => request('DELETE', `/unmatched/${key}`),
 	agents: () => request<AgentCard[]>('GET', '/agents'),

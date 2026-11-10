@@ -7,13 +7,22 @@ from langgraph.store.base import BaseStore
 from pydantic import BaseModel, Field
 
 from findmeajob.agents.deps import Deps
+from findmeajob.events import broker
 from findmeajob.llm import ask
 from findmeajob.memory import now, profile_context, set_status
 from findmeajob.state import CaseState, posting_text
 from findmeajob.tools.browser import Blocked
+from findmeajob.tools.chrome import FILL_TIMEOUT_SECONDS, NETWORK_HICCUPS
 from findmeajob.tools.jobs.listing import html_to_text
 
 SALARY_FIELD = re.compile(r"salary|compensation|pay|remuneration|expected", re.I)
+TRANSIENT = (
+    "has been closed",
+    "Target closed",
+    "frame was detached",
+    "Execution context was destroyed",
+    *NETWORK_HICCUPS,
+)
 MAX_STEPS = 10
 MAX_VALIDATION_RETRIES = 2
 
@@ -87,6 +96,11 @@ def missing_facts(fields: list[dict[str, Any]], answers: list[dict[str, Any]]) -
     return [label for field_id, label in required.items() if not answered.get(field_id, {}).get("grounded")]
 
 
+def transient(error: Exception) -> bool:
+    text = str(error)
+    return any(token in text for token in TRANSIENT)
+
+
 async def run(state: CaseState, deps: Deps, store: BaseStore) -> dict[str, Any]:
     posting = state["posting"]
     url = posting.get("apply_url") or posting["url"]
@@ -96,72 +110,82 @@ async def run(state: CaseState, deps: Deps, store: BaseStore) -> dict[str, Any]:
             "application": {**application, "blocked": "chrome isn't set up, so clerk can't fill anything."},
             "stage": "blocked",
         }
-    try:
-        async with deps.chrome.fill_form(url) as session:
-            steps: list[dict[str, Any]] = []
-            all_fields: list[dict[str, Any]] = []
-            all_answers: list[dict[str, Any]] = []
-            salary: SalaryRange | None = None
-            repeats: dict[str, int] = {}
-            validation_errors: list[str] = []
-            validation_retries = 0
-            for step_number in range(1, MAX_STEPS + 1):
-                fields = await session.fields()
-                signature = json.dumps([(field["type"], field["label"]) for field in fields])
-                repeats[signature] = repeats.get(signature, 0) + 1
-                if repeats[signature] > MAX_VALIDATION_RETRIES + 1:
-                    raise Blocked("the form got stuck on the same step after multiple fixes.")
+    def notify(waiting: bool) -> None:
+        broker.publish("captcha", case_id=state["case_id"], waiting=waiting)
 
-                answers: list[dict[str, Any]] = []
-                if fields:
-                    answers, salary = await answer(deps, store, state, fields, salary, validation_errors)
-                    missing = missing_facts(fields, answers)
-                    if missing:
-                        raise Blocked(
-                            f"your profile is missing {', '.join(missing)}. add it and retry, we don't invent stuff."
-                        )
-                    await session.fill(
-                        fields, {item["field_id"]: item["value"] for item in answers}, Path(state["cv"]["pdf"])
-                    )
-                outcome = await session.advance()
-                steps.append(
-                    {
-                        "number": step_number,
-                        "fields": fields,
-                        "answers": answers,
-                        "outcome": outcome["status"],
-                        "errors": outcome.get("errors", []),
-                    }
-                )
-                if outcome["status"] == "validation":
-                    validation_retries += 1
-                    if validation_retries > MAX_VALIDATION_RETRIES:
-                        raise Blocked("the form kept rejecting its answers: " + "; ".join(outcome["errors"])[:240])
-                    validation_errors = outcome["errors"]
-                    continue
-
-                validation_errors = []
+    for attempt in (1, 2):
+        try:
+            async with deps.chrome.fill_form(url, state["case_id"], notify) as session:
+                steps: list[dict[str, Any]] = []
+                all_fields: list[dict[str, Any]] = []
+                all_answers: list[dict[str, Any]] = []
+                salary: SalaryRange | None = None
+                repeats: dict[str, int] = {}
+                validation_errors: list[str] = []
                 validation_retries = 0
-                all_fields.extend(fields)
-                all_answers.extend(answers)
-                if outcome["status"] == "submitted":
-                    application["confirmation"] = outcome["confirmation"]
-                    break
-                if outcome["status"] == "unconfirmed":
-                    raise Blocked("the form was sent, but the site did not show a reliable confirmation.")
-            else:
-                raise Blocked(f"the application exceeded {MAX_STEPS} steps, so Clerk stopped safely.")
-            application.update(
-                fields=all_fields,
-                answers=all_answers,
-                salary=salary.model_dump() if salary else None,
-                steps=steps,
-            )
-    except Blocked as reason:
-        await set_status(store, "chrome", True, f"Blocked on {url}")
-        return {"application": {**application, "blocked": str(reason)}, "stage": "blocked"}
-    except Exception as error:
-        await set_status(store, "chrome", False, f"chrome crashed out: {error}"[:300])
-        return {"application": {**application, "blocked": f"chrome crashed out: {error}"}, "stage": "blocked"}
+                for step_number in range(1, MAX_STEPS + 1):
+                    fields = await session.fields()
+                    signature = json.dumps([(field["type"], field["label"]) for field in fields])
+                    repeats[signature] = repeats.get(signature, 0) + 1
+                    if repeats[signature] > MAX_VALIDATION_RETRIES + 1:
+                        raise Blocked("the form got stuck on the same step after multiple fixes.")
+
+                    answers: list[dict[str, Any]] = []
+                    if fields:
+                        answers, salary = await answer(deps, store, state, fields, salary, validation_errors)
+                        missing = missing_facts(fields, answers)
+                        if missing:
+                            joined = ", ".join(missing)
+                            raise Blocked(f"your profile is missing {joined}. add it and retry, we don't invent stuff.")
+                        await session.fill(
+                            fields, {item["field_id"]: item["value"] for item in answers}, Path(state["cv"]["pdf"])
+                        )
+                    outcome = await session.advance()
+                    steps.append(
+                        {
+                            "number": step_number,
+                            "fields": fields,
+                            "answers": answers,
+                            "outcome": outcome["status"],
+                            "errors": outcome.get("errors", []),
+                        }
+                    )
+                    if outcome["status"] == "validation":
+                        validation_retries += 1
+                        if validation_retries > MAX_VALIDATION_RETRIES:
+                            raise Blocked("the form kept rejecting its answers: " + "; ".join(outcome["errors"])[:240])
+                        validation_errors = outcome["errors"]
+                        continue
+
+                    validation_errors = []
+                    validation_retries = 0
+                    all_fields.extend(fields)
+                    all_answers.extend(answers)
+                    if outcome["status"] == "submitted":
+                        application["confirmation"] = outcome["confirmation"]
+                        break
+                    if outcome["status"] == "unconfirmed":
+                        raise Blocked("the form was sent, but the site did not show a reliable confirmation.")
+                else:
+                    raise Blocked(f"the application exceeded {MAX_STEPS} steps, so Clerk stopped safely.")
+                application.update(
+                    fields=all_fields,
+                    answers=all_answers,
+                    salary=salary.model_dump() if salary else None,
+                    steps=steps,
+                )
+            break
+        except Blocked as reason:
+            await set_status(store, "chrome", True, f"Blocked on {url}")
+            return {"application": {**application, "blocked": str(reason)}, "stage": "blocked"}
+        except TimeoutError:
+            stuck = f"the page stopped responding for {FILL_TIMEOUT_SECONDS // 60} minutes, so Clerk let go. retry it."
+            await set_status(store, "chrome", False, stuck)
+            return {"application": {**application, "blocked": stuck}, "stage": "blocked"}
+        except Exception as error:
+            if attempt == 1 and transient(error):
+                continue
+            await set_status(store, "chrome", False, f"chrome crashed out: {error}"[:300])
+            return {"application": {**application, "blocked": f"chrome crashed out: {error}"}, "stage": "blocked"}
     await set_status(store, "chrome", True, f"Submitted {url}")
     return {"application": application, "stage": "applied"}

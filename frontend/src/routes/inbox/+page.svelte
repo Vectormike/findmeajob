@@ -13,7 +13,7 @@
 	let filter = $state('all');
 	let detailsOpen = $state(false);
 	const selected = $derived(page.url.searchParams.get('case') ?? inbox.cases[0]?.key ?? null);
-	const selectedCase = $derived(detail && selected ? { ...detail.index, key: selected } : null);
+	const selectedCase = $derived(detail && selected ? { ...detail.index, key: selected, captcha: detail.captcha } : null);
 
 	$effect(() => {
 		void live.tick;

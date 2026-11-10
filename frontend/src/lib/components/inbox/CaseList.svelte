@@ -51,7 +51,9 @@
 	<button class="case" class:selected={selected === c.key} onclick={() => onselect(c.key)}>
 		<div class="row between">
 			<span class="row"><span class="logo">{initials(c.company)}</span><b>{c.company}</b></span>
-			{#if busy}
+			{#if live.captcha[c.key] ?? c.captcha}
+				<span class="small needs">Needs you</span>
+			{:else if busy}
 				<span class="pulse small working">{agent(busy).title}'s on it</span>
 			{:else if c.error}
 				<Badge value="error" />
@@ -177,6 +179,13 @@
 	}
 	.pinned {
 		margin-bottom: 4px;
+	}
+	.needs {
+		padding: 1px 8px;
+		border-radius: 999px;
+		background: var(--amber-bg);
+		color: var(--amber);
+		font-weight: 600;
 	}
 	.case {
 		width: 100%;

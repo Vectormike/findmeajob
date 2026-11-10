@@ -20,8 +20,11 @@ READ_FIELDS = r"""
   const visible = (el) => {
     const style = getComputedStyle(el);
     const box = el.getBoundingClientRect();
-    return !el.disabled && style.display !== 'none' && style.visibility !== 'hidden' && box.width > 0 && box.height > 0;
+    return !el.disabled && !el.closest('[aria-hidden="true"]') && style.display !== 'none' &&
+      style.visibility !== 'hidden' && box.width > 0 && box.height > 0;
   };
+  const shown = (el) => visible(el) || (el.type === 'file' && !el.disabled && !el.closest('[aria-hidden="true"]') &&
+    el.parentElement?.checkVisibility({ visibilityProperty: true }));
   const fields = [];
   const groups = {};
   let n = 0;
@@ -31,7 +34,7 @@ READ_FIELDS = r"""
   ].join(',');
   const seen = new Set();
   for (const el of document.querySelectorAll(selector)) {
-    if (seen.has(el) || !visible(el)) continue;
+    if (seen.has(el) || !shown(el)) continue;
     seen.add(el);
     if (el.matches('[role="combobox"]')) {
       el.querySelectorAll('input').forEach((child) => seen.add(child));
@@ -79,7 +82,7 @@ READ_FIELDS = r"""
     if (el.getAttribute('role') === 'combobox' || el.getAttribute('aria-autocomplete')) {
       field.type = 'combobox';
       const list = el.getAttribute('aria-controls');
-      const root = list ? document.getElementById(list) : document.querySelector('[role="listbox"]');
+      const root = list ? document.getElementById(list) : null;
       field.options = root
         ? [...root.querySelectorAll('[role="option"]')].map((o) => ({
             id: o.id || o.innerText.trim(),
@@ -107,13 +110,31 @@ READ_ERRORS = r"""
     messages.add(`${label}: ${text || el.validationMessage || 'invalid value'}`);
   }
   const errorSelector = [
-    '[role="alert"]', '.error', '.field-error', '.validation-error', '[data-automation-id*="error"]'
+    '[role="alert"]', '.error', '.field-error', '.validation-error', '[data-automation-id*="error"]',
+    '.ashby-application-form-failure-container', '.ashby-application-form-blocked-application-container'
   ].join(',');
   for (const el of document.querySelectorAll(errorSelector)) {
     const text = el.innerText?.trim();
     if (text && el.getBoundingClientRect().height > 0) messages.add(text);
   }
   return [...messages].slice(0, 20);
+}
+"""
+
+CAPTCHA_OPEN = r"""
+() => {
+  const tokens = '[name="g-recaptcha-response"], [name="h-captcha-response"], [name="cf-turnstile-response"]';
+  if ([...document.querySelectorAll(tokens)].some((el) => el.value)) return false;
+  const found = document.querySelectorAll([
+    'iframe[src*="captcha"]', 'iframe[src*="challenges.cloudflare.com"]',
+    '[class*="captcha"]', '[id*="captcha"]', '[data-sitekey]'
+  ].join(','));
+  return [...found].some((el) => {
+    if (el.closest('.grecaptcha-badge') || (el.src || '').includes('size=invisible')) return false;
+    if (el.getAttribute('data-size') === 'invisible') return false;
+    const box = el.getBoundingClientRect();
+    return box.width > 0 && box.height > 0 && getComputedStyle(el).visibility !== 'hidden';
+  });
 }
 """
 

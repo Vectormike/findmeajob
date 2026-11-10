@@ -96,6 +96,36 @@ async def test_clerk_stops_a_repeating_form(workflow, deps):
     assert "stuck on the same step" in case["application"]["blocked"]
 
 
+async def test_clerk_retries_once_when_the_browser_closes(workflow, deps):
+    deps.chrome.crashes = [RuntimeError("Page.goto: net::ERR_NETWORK_CHANGED at https://jobicy.com/jobs/1")]
+
+    case = await run_case(workflow)
+
+    assert case["stage"] == "applied"
+    assert deps.chrome.filled["f0"] == "Ada Lovelace"
+
+
+async def test_clerk_blocks_when_the_browser_closes_twice(workflow, deps):
+    deps.chrome.crashes = [
+        RuntimeError("Target page, context or browser has been closed"),
+        RuntimeError("Target page, context or browser has been closed"),
+    ]
+
+    case = await run_case(workflow)
+
+    assert case["stage"] == "blocked"
+    assert "has been closed" in case["application"]["blocked"]
+
+
+async def test_clerk_lets_go_of_a_page_that_stops_responding(workflow, deps):
+    deps.chrome.crashes = [TimeoutError()]
+
+    case = await run_case(workflow)
+
+    assert case["stage"] == "blocked"
+    assert "stopped responding" in case["application"]["blocked"]
+
+
 def test_common_ats_hosts_get_a_strategy():
     assert strategy_for("https://boards.greenhouse.io/acme").name == "greenhouse"
     assert strategy_for("https://jobs.lever.co/acme").name == "lever"

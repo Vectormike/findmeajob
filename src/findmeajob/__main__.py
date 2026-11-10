@@ -9,7 +9,7 @@ from findmeajob.agents.deps import Deps
 from findmeajob.config import get_settings
 from findmeajob.llm import get_model
 from findmeajob.memory import open_memory
-from findmeajob.tools.browser import Chrome
+from findmeajob.tools.chrome import Chrome
 from findmeajob.tools.gmail import authorize
 from findmeajob.tools.jobs.listing import ARRANGEMENTS
 from findmeajob.workflow import Workflow

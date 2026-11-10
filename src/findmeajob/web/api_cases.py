@@ -2,8 +2,9 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, HTMLResponse
-from pydantic import BaseModel
+from fastapi.responses import FileResponse, HTMLResponse, Response
+from playwright.async_api import Error as PlaywrightError
+from pydantic import BaseModel, Field
 
 from findmeajob.agents import inbox, scout
 from findmeajob.memory import UNMATCHED, list_values
@@ -34,10 +35,30 @@ class Assignment(BaseModel):
     case_id: str
 
 
+class LiveAction(BaseModel):
+    kind: Literal["click", "type", "key", "scroll"]
+    x: float = Field(0, ge=0, le=1)
+    y: float = Field(0, ge=0, le=1)
+    text: str = Field("", max_length=200)
+    key: Literal["Enter", "Tab", "Backspace", "Escape", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"] = "Enter"
+    dy: float = Field(0, ge=-2000, le=2000)
+
+
+def live_page(request: Request, case_id: str) -> Any:
+    chrome = workflow_of(request).deps.chrome
+    page = chrome.live.get(case_id) if chrome else None
+    if not page:
+        raise HTTPException(404, "nothing on this case is waiting for a captcha.")
+    return page
+
+
 @router.get("/inbox")
 async def inbox_view(request: Request) -> dict[str, Any]:
     workflow = workflow_of(request)
-    cases = [c for c in await all_cases(workflow) if c.get("stage") in OPEN_STAGES]
+    live = workflow.deps.chrome.live if workflow.deps.chrome else {}
+    cases = [
+        {**c, "captcha": c["key"] in live} for c in await all_cases(workflow) if c.get("stage") in OPEN_STAGES
+    ]
     counts = {group: sum(c["stage"] in stages for c in cases) for group, stages in STAGE_GROUPS.items()}
     return {"cases": cases, "counts": counts, "unmatched": await list_values(workflow.store, UNMATCHED)}
 
@@ -118,6 +139,33 @@ async def retry_agent(request: Request, case_id: str, agent: str) -> dict[str, s
         raise HTTPException(409, f"{agent} can't be retried on this case right now.")
     background(request, workflow.rerun(case_id, agent))
     return {"status": "running"}
+
+
+@router.get("/cases/{case_id}/live.jpg")
+async def live_frame(request: Request, case_id: str) -> Response:
+    try:
+        image = await live_page(request, case_id).screenshot(type="jpeg", quality=70)
+    except PlaywrightError as error:
+        raise HTTPException(409, "the application page closed.") from error
+    return Response(image, media_type="image/jpeg", headers={"Cache-Control": "no-store"})
+
+
+@router.post("/cases/{case_id}/live")
+async def live_act(request: Request, case_id: str, action: LiveAction) -> dict[str, str]:
+    page = live_page(request, case_id)
+    size = page.viewport_size or {"width": 1280, "height": 720}
+    try:
+        if action.kind == "click":
+            await page.mouse.click(action.x * size["width"], action.y * size["height"])
+        elif action.kind == "type":
+            await page.keyboard.type(action.text)
+        elif action.kind == "key":
+            await page.keyboard.press(action.key)
+        else:
+            await page.mouse.wheel(0, action.dy)
+    except PlaywrightError as error:
+        raise HTTPException(409, "the application page closed.") from error
+    return {"status": "ok"}
 
 
 @router.get("/cases/{case_id}/cv")
