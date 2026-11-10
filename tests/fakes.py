@@ -108,6 +108,10 @@ async def fake_fetch_page(url: str) -> dict[str, str]:
     return {"url": url, "title": "Backend Engineer", "text": "Backend Engineer at Acme. Node.js and Kafka."}
 
 
+async def no_employer_board(posting: dict) -> None:
+    return None
+
+
 class FakeSession:
     def __init__(self, chrome: "FakeChrome") -> None:
         self.chrome = chrome

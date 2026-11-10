@@ -13,6 +13,7 @@ from findmeajob.memory import now, profile_context, set_status
 from findmeajob.state import CaseState, posting_text
 from findmeajob.tools.browser import Blocked
 from findmeajob.tools.chrome import FILL_TIMEOUT_SECONDS, NETWORK_HICCUPS
+from findmeajob.tools.jobs.employer import AGGREGATORS
 from findmeajob.tools.jobs.listing import html_to_text
 
 SALARY_FIELD = re.compile(r"salary|compensation|pay|remuneration|expected", re.I)
@@ -133,6 +134,14 @@ async def run(state: CaseState, deps: Deps, store: BaseStore) -> dict[str, Any]:
             "application": {**application, "blocked": "chrome isn't set up, so clerk can't fill anything."},
             "stage": "blocked",
         }
+    if not posting.get("apply_url"):
+        employer = await deps.employer_apply_url(posting)
+        if employer:
+            url = application["url"] = employer
+        elif posting.get("source") in AGGREGATORS:
+            stuck = "this job board lists no apply link for the role. its posting says how to apply, so check it."
+            return {"application": {**application, "blocked": stuck}, "stage": "blocked"}
+
     def notify(waiting: bool) -> None:
         broker.publish("captcha", case_id=state["case_id"], waiting=waiting)
 

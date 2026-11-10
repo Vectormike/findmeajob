@@ -5,11 +5,11 @@ from functools import partial
 
 import httpx
 
+from findmeajob.tools.jobs.employer import HEADERS
 from findmeajob.tools.jobs.listing import ARRANGEMENTS, Listing, matches, normalize_region, place_terms
 from findmeajob.tools.jobs.sources import SOURCES, Source, the_muse
 
 log = logging.getLogger(__name__)
-HEADERS = {"User-Agent": "findmeajob/0.1 (personal job search)"}
 
 
 def sources_for(region: str, arrangement: str, extras: tuple[Source, ...] = ()) -> list[Source]:

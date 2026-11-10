@@ -7,7 +7,14 @@ from langgraph.store.memory import InMemoryStore
 from findmeajob.agents.deps import Deps
 from findmeajob.memory import write_profile
 from findmeajob.workflow import Workflow
-from tests.fakes import FakeChrome, FakeGmail, FakeModel, fake_fetch_page, fake_research
+from tests.fakes import (
+    FakeChrome,
+    FakeGmail,
+    FakeModel,
+    fake_fetch_page,
+    fake_research,
+    no_employer_board,
+)
 
 POSTING = {
     "source": "test",
@@ -31,6 +38,7 @@ def deps(tmp_path: Any) -> Deps:
         gmail=FakeGmail(),
         research=fake_research,
         fetch_page=fake_fetch_page,
+        employer_apply_url=no_employer_board,
     )
 
 
