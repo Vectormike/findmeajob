@@ -46,3 +46,7 @@ uv run findmeajob serve
 ```
 
 Open http://127.0.0.1:8000. Put `XAI_API_KEY` in `.env` before the agents can think. `.env` stays off git.
+
+## License
+
+[MIT](LICENSE)
