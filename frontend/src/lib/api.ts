@@ -15,6 +15,12 @@ export type CaseRow = {
 	region: string;
 	skill: string;
 	arrangement: string;
+	location?: string;
+	salary?: string;
+	posted_at?: string;
+	remote?: boolean;
+	source?: string;
+	fit?: string;
 	stage: string;
 	last_agent: string;
 	updated_at: string;
