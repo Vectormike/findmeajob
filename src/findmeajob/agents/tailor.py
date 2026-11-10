@@ -7,12 +7,11 @@ from langgraph.store.base import BaseStore
 from pydantic import BaseModel, Field
 
 from findmeajob.agents.deps import Deps
-from findmeajob.llm import ask
+from findmeajob.llm import LOW_EFFORT, ask
 from findmeajob.memory import profile_context
 from findmeajob.state import CaseState, posting_text
 
 PASS_TIMEOUT_SECONDS = 180
-REASONING_EFFORT = "low"
 
 SYSTEM = (
     "You are Tailor. You write a CV for one job so it passes the employer's ATS and reads well to a recruiter. "
@@ -34,8 +33,8 @@ SYSTEM = (
     "Write like the candidate, not like an AI. Keep the master CV's own wording wherever it already fits and "
     "change only what the job needs. Use plain, specific verbs such as built, designed, fixed, ran, or cut. Never "
     "use em dashes, semicolons, or filler words such as leveraged, spearheaded, robust, seamless, cutting-edge, "
-    "streamlining, boosting, ensuring, utilize, or passionate, and never write in the first person. Vary sentence length and do not force every list "
-    "into three items. "
+    "streamlining, boosting, ensuring, utilize, or passionate, and never write in the first person. "
+    "Vary sentence length and do not force every list into three items. "
     "Keep every role in reverse chronology. Within each role, select 1-5 relevant bullets and order the strongest "
     "evidence first. Front-load the job's supported keywords and retain the original facts and metrics. "
     "Do not keep an irrelevant bullet merely to fill space. Ensure every supported must-have appears in the "
@@ -54,7 +53,7 @@ SYSTEM = (
     "cv_html must use this shape and nothing else. No markdown fences, no wrapping quotes. "
     "Section order is Work Experience, then Education.\n"
     '<div class="head"><h1>Full name</h1><div class="identity">'
-    "<p>Title<br>City, Country<br>link<br>link<br>email</p>"
+    "<p>Title<br>City, Country<br>link<br>link<br>email<br>phone</p>"
     '<p class="summary">Summary paragraph from the master CV.</p></div></div>\n'
     "<h2>Work Experience</h2>"
     '<div class="role"><p class="role-line"><strong>Title</strong><span>Company</span>'
@@ -150,8 +149,8 @@ def clean_html(html: str) -> str:
             attrs["class"] = kept
         tag.attrs = attrs
     for text in list(soup.find_all(string=True)):
-        if "—" in text:
-            plain = NavigableString(re.sub(r"\s*—\s*", ", ", text))
+        if "—" in text or "\\" in text:
+            plain = NavigableString(re.sub(r"\s*—\s*", ", ", re.sub(r"\\[nrt]", " ", text)))
             text.replace_with(plain)
             text = plain
         cleaned = text.strip()
@@ -206,7 +205,7 @@ async def run(state: CaseState, deps: Deps, store: BaseStore) -> dict[str, Any]:
         f"Posting:\n{focused_posting(state['posting'])}"
     )
     cv = await asyncio.wait_for(
-        ask(deps.model, TailoredCv, SYSTEM, context, REASONING_EFFORT),
+        ask(deps.model, TailoredCv, SYSTEM, context, LOW_EFFORT),
         timeout=PASS_TIMEOUT_SECONDS,
     )
     html = PAGE.format(body=set_skills(clean_html(cv.cv_html), cv.role_skills))

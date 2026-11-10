@@ -32,7 +32,7 @@ STRATEGIES = (
         ("ashbyhq.com",),
         next_selectors=('button[data-testid*="next"]',),
         submit_selectors=('button[data-testid*="submit"]', 'button[type="submit"]'),
-        success_selectors=('[data-testid*="success"]',),
+        success_selectors=('[data-testid*="success"]', ".ashby-application-form-success-container"),
     ),
     AtsStrategy(
         "workday",

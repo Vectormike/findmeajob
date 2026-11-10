@@ -1,10 +1,13 @@
+import pytest
+
 from findmeajob.agents import scout
 from findmeajob.events import broker
 from findmeajob.memory import CASES, STATUS
 from findmeajob.tools.jobs.listing import Listing
 
 
-async def test_repeat_sweep_redisplays_existing_case_without_reopening(workflow, monkeypatch):
+@pytest.mark.parametrize(("region", "skill"), [("germany", "Node.js"), ("europe", "Backend Engineer")])
+async def test_repeat_sweep_redisplays_existing_case_without_reopening(workflow, monkeypatch, region, skill):
     listing = Listing(
         source="test",
         title="Backend Engineer",
@@ -25,7 +28,7 @@ async def test_repeat_sweep_redisplays_existing_case_without_reopening(workflow,
 
     monkeypatch.setattr(scout, "search_job_batches", batches)
     async with broker.subscribe() as queue:
-        opened = await scout.run(workflow, "germany", "Node.js", "any", 20)
+        opened = await scout.run(workflow, region, skill, "any", 20)
         events = []
         while not queue.empty():
             events.append(queue.get_nowait())
@@ -36,3 +39,12 @@ async def test_repeat_sweep_redisplays_existing_case_without_reopening(workflow,
     assert "none new, 1 already here" in status.value["detail"]
     assert status.value["run_id"]
     assert status.value["case_ids"] == [case_id]
+
+
+async def test_opening_a_case_finds_the_company_logo(workflow):
+    listing = Listing(source="test", title="Backend Engineer", company="Acme", url="https://acme.example/job")
+    posting = listing.model_dump()
+
+    await scout._fill(workflow, listing, posting)
+
+    assert posting["logo"] == "https://acme.example/logo.png"

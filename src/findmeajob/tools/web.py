@@ -22,7 +22,7 @@ async def fetch_page(url: str) -> dict[str, str]:
     return {"url": str(response.url), "title": title, "text": text[:PAGE_LIMIT]}
 
 
-def _search(query: str, max_results: int) -> list[dict[str, Any]]:
+def search_hits(query: str, max_results: int) -> list[dict[str, Any]]:
     return [
         {"title": hit.get("title", ""), "url": hit.get("href", ""), "snippet": hit.get("body", "")}
         for hit in DDGS().text(query, max_results=max_results)
@@ -34,7 +34,7 @@ async def search_web(query: str) -> list[dict[str, Any]]:
     """Search the public web and return titles, URLs, and snippets.
 
     Use site:reddit.com or site:glassdoor.com in the query to target a source."""
-    return await asyncio.to_thread(_search, query, 8)
+    return await asyncio.to_thread(search_hits, query, 8)
 
 
 @tool

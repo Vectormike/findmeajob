@@ -13,7 +13,7 @@ from findmeajob.agents.inbox import poll_forever
 from findmeajob.config import Settings, get_settings
 from findmeajob.llm import get_model
 from findmeajob.memory import open_memory, set_status
-from findmeajob.tools.browser import Chrome
+from findmeajob.tools.chrome import Chrome
 from findmeajob.tools.gmail import Gmail
 from findmeajob.web import api_cases, api_pages
 from findmeajob.workflow import Workflow

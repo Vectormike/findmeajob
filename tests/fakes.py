@@ -108,6 +108,14 @@ async def fake_fetch_page(url: str) -> dict[str, str]:
     return {"url": url, "title": "Backend Engineer", "text": "Backend Engineer at Acme. Node.js and Kafka."}
 
 
+async def no_employer_board(posting: dict) -> None:
+    return None
+
+
+async def fake_company_logo(posting: dict) -> str:
+    return posting.get("logo") or "https://acme.example/logo.png"
+
+
 class FakeSession:
     def __init__(self, chrome: "FakeChrome") -> None:
         self.chrome = chrome
@@ -132,6 +140,8 @@ class FakeChrome:
     ) -> None:
         self.filled: dict[str, str] = {}
         self.fill_history: list[dict[str, str]] = []
+        self.crashes: list[BaseException] = []
+        self.live: dict[str, Any] = {}
         self.steps = steps or [FIELDS]
         self.outcomes = outcomes or [
             {
@@ -146,7 +156,9 @@ class FakeChrome:
         self.step = 0
 
     @asynccontextmanager
-    async def fill_form(self, url: str) -> Any:
+    async def fill_form(self, url: str, case_id: str | None = None, notify: Any = None) -> Any:
+        if self.crashes:
+            raise self.crashes.pop(0)
         yield FakeSession(self)
 
     async def render_pdf(self, html: str, path: Path) -> Path:

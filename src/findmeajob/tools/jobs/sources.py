@@ -8,6 +8,7 @@ import httpx
 from bs4 import BeautifulSoup
 
 from findmeajob.tools.jobs.listing import Listing, html_to_text
+from findmeajob.tools.jobs.logos import usable_logo
 
 MAX_PAGES = 5
 Fetch = Callable[[httpx.AsyncClient, str], Awaitable[list[Listing]]]
@@ -57,6 +58,7 @@ async def remotive(client: httpx.AsyncClient, skill: str) -> list[Listing]:
             tags=job["tags"],
             salary=job["salary"],
             posted_at=job["publication_date"][:10],
+            logo=job.get("company_logo") or "",
         )
         for job in data["jobs"]
     ]
@@ -77,6 +79,7 @@ async def remoteok(client: httpx.AsyncClient, skill: str) -> list[Listing]:
             tags=job.get("tags", []),
             salary=f"{job['salary_min']}-{job['salary_max']}" if job.get("salary_min") else "",
             posted_at=job.get("date", "")[:10],
+            logo=job.get("company_logo") or job.get("logo") or "",
         )
         for job in data
         if "position" in job
@@ -97,6 +100,7 @@ async def jobicy(client: httpx.AsyncClient, skill: str) -> list[Listing]:
             remote=True,
             tags=[*job.get("jobIndustry", []), *job.get("jobType", [])],
             posted_at=job.get("pubDate", "")[:10],
+            logo=job.get("companyLogo") or "",
         )
         for job in data.get("jobs", [])
     ]
@@ -147,6 +151,7 @@ async def _myjobmag_page(client: httpx.AsyncClient, skill: str, page: int) -> li
             continue
         title, _, company = link.get_text(strip=True).rpartition(" at ")
         desc = row.select_one("li.job-desc")
+        logo = row.select_one("li.job-logo img")
         listings.append(
             Listing(
                 source="myjobmag",
@@ -155,6 +160,7 @@ async def _myjobmag_page(client: httpx.AsyncClient, skill: str, page: int) -> li
                 url=urljoin("https://www.myjobmag.com", link["href"]),
                 location="Nigeria",
                 description=desc.get_text(" ", strip=True) if desc else "",
+                logo=usable_logo(logo.get("src"), "https://www.myjobmag.com") if logo else "",
             )
         )
     return listings

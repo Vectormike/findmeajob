@@ -63,4 +63,5 @@ async def case_detail(workflow: Workflow, case_id: str) -> dict[str, Any]:
         "index": item.value if item else {},
         "waiting": await workflow.waiting(case_id),
         "retryable": await workflow.retryable(case_id),
+        "captcha": bool(workflow.deps.chrome and case_id in workflow.deps.chrome.live),
     }

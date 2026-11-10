@@ -15,11 +15,25 @@ export type CaseRow = {
 	region: string;
 	skill: string;
 	arrangement: string;
+	location?: string;
+	salary?: string;
+	posted_at?: string;
+	remote?: boolean;
+	source?: string;
+	fit?: string;
+	logo?: string;
 	stage: string;
 	last_agent: string;
 	updated_at: string;
 	error?: string;
+	captcha?: boolean;
 };
+
+export type LiveAction =
+	| { kind: 'click'; x: number; y: number }
+	| { kind: 'type'; text: string }
+	| { kind: 'key'; key: string }
+	| { kind: 'scroll'; dy: number };
 
 export type Mail = {
 	id: string;
@@ -67,6 +81,7 @@ export type Case = {
 		url: string;
 		at: string;
 		blocked?: string;
+		missing?: (MissingFact | string)[];
 		answers?: { field_id: string; value: string; source: string }[];
 		fields?: { id: string; label: string }[];
 		steps?: {
@@ -100,7 +115,7 @@ export type Case = {
 	sent: { to: string; subject: string; body: string; at: string }[];
 };
 
-export type CaseDetail = { case: Case; index: CaseRow; waiting: boolean; retryable: string[] };
+export type CaseDetail = { case: Case; index: CaseRow; waiting: boolean; retryable: string[]; captcha: boolean };
 
 export type Unmatched = {
 	key: string;
@@ -111,6 +126,10 @@ export type Unmatched = {
 export type Inbox = { cases: CaseRow[]; counts: Record<string, number>; unmatched: Unmatched[] };
 
 export type Story = { title: string; text: string };
+
+export type FormFact = { question: string; answer: string; job?: string };
+
+export type MissingFact = { question: string; options: string[] };
 
 export type Profile = {
 	name: string;
@@ -123,6 +142,7 @@ export type Profile = {
 	work_authorization: string;
 	skip_companies: string[];
 	stories: Story[];
+	form_facts: FormFact[];
 	master_cv: string;
 	master_cv_file: string;
 };
@@ -173,6 +193,8 @@ export const api = {
 	close: (id: string) => request<CaseDetail>('POST', `/cases/${id}/close`),
 	retry: (id: string) => request('POST', `/cases/${id}/retry`),
 	retryAgent: (id: string, agent: string) => request('POST', `/cases/${id}/retry/${agent}`),
+	addFacts: (id: string, facts: FormFact[]) => request('POST', `/cases/${id}/facts`, { facts }),
+	liveAct: (id: string, action: LiveAction) => request('POST', `/cases/${id}/live`, action),
 	assign: (key: string, caseId: string) => request('POST', `/unmatched/${key}/assign`, { case_id: caseId }),
 	dismiss: (key: string) => request('DELETE', `/unmatched/${key}`),
 	agents: () => request<AgentCard[]>('GET', '/agents'),

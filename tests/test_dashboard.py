@@ -1,3 +1,4 @@
+import asyncio
 from io import BytesIO
 from pathlib import Path
 
@@ -46,6 +47,77 @@ def test_api_lists_cases_and_details(deps, tmp_path):
         assert 'attachment; filename="cv-c1.pdf"' == download.headers["content-disposition"]
         agents = {card["name"]: card for card in http.get("/api/agents").json()}
         assert agents["clerk"]["last"]["key"] == "c1"
+
+class FakeLivePage:
+    viewport_size = {"width": 1000, "height": 500}
+
+    def __init__(self) -> None:
+        self.actions: list[tuple] = []
+        self.mouse = self
+        self.keyboard = self
+
+    async def screenshot(self, **_: object) -> bytes:
+        return b"jpeg"
+
+    async def click(self, x: float, y: float) -> None:
+        self.actions.append(("click", x, y))
+
+    async def type(self, text: str) -> None:
+        self.actions.append(("type", text))
+
+    async def press(self, key: str) -> None:
+        self.actions.append(("key", key))
+
+    async def wheel(self, dx: float, dy: float) -> None:
+        self.actions.append(("scroll", dy))
+
+
+def test_live_view_relays_a_person_on_a_captcha(deps, tmp_path):
+    with client(deps, tmp_path) as http:
+        http.portal.call(http.app.state.workflow.start, "c1", POSTING, FILTERS)
+        assert http.get("/api/cases/c1/live.jpg").status_code == 404
+        assert http.get("/api/cases/c1").json()["captcha"] is False
+
+        page = FakeLivePage()
+        deps.chrome.live["c1"] = page
+        assert http.get("/api/cases/c1").json()["captcha"] is True
+        assert http.get("/api/inbox").json()["cases"][0]["captcha"] is True
+        assert http.get("/api/cases/c1/live.jpg").content == b"jpeg"
+        for action in (
+            {"kind": "click", "x": 0.5, "y": 0.2},
+            {"kind": "type", "text": "ada"},
+            {"kind": "key", "key": "Enter"},
+            {"kind": "scroll", "dy": 300},
+        ):
+            assert http.post("/api/cases/c1/live", json=action).status_code == 200
+        assert page.actions == [("click", 500, 100), ("type", "ada"), ("key", "Enter"), ("scroll", 300)]
+        assert http.post("/api/cases/c1/live", json={"kind": "key", "key": "F12"}).status_code == 422
+
+
+def test_answering_what_clerk_missed_saves_it_and_reruns_clerk(deps, tmp_path):
+    deps.model.grounded = False
+    with client(deps, tmp_path) as http:
+        workflow = http.app.state.workflow
+        http.portal.call(workflow.start, "c1", POSTING, FILTERS)
+        case = http.get("/api/cases/c1").json()["case"]
+        assert case["stage"] == "blocked"
+        assert case["application"]["missing"] == [{"question": "Full name", "options": []}]
+        assert http.get("/api/inbox").json()["counts"]["needs_you"] == 1
+
+        deps.model.grounded = True
+        facts = {"facts": [{"question": "Full name", "answer": "Ada Lovelace"}]}
+        assert http.post("/api/cases/c1/facts", json=facts).status_code == 202
+        for _ in range(100):
+            if http.get("/api/cases/c1").json()["case"]["stage"] == "applied":
+                break
+            http.portal.call(asyncio.sleep, 0.05)
+
+        assert http.get("/api/cases/c1").json()["case"]["stage"] == "applied"
+        saved = http.get("/api/profile").json()["profile"]["form_facts"]
+        assert saved == [{"question": "Full name", "answer": "Ada Lovelace", "job": "Acme, Berlin"}]
+        assert "Full name (asked by Acme, Berlin): Ada Lovelace" in deps.model.prompts[-1]
+        assert http.post("/api/cases/c1/facts", json={"facts": []}).status_code == 422
+
 
 def test_integrations_have_working_health_checks(deps, tmp_path):
     with client(deps, tmp_path) as http:

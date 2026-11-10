@@ -9,6 +9,8 @@
 	import Badge from '../Badge.svelte';
 	import Bubble from './Bubble.svelte';
 	import Composer from './Composer.svelte';
+	import Handoff from './Handoff.svelte';
+	import MissingFacts from './MissingFacts.svelte';
 	import Prep from './Prep.svelte';
 
 	let {
@@ -19,6 +21,12 @@
 	const c = $derived(detail.case);
 	const items = $derived(timeline(c));
 	const busy = $derived(live.working[c.case_id]);
+	const captcha = $derived(live.captcha[c.case_id] ?? detail.captcha);
+	const missing = $derived(
+		c.stage === 'blocked'
+			? (c.application?.missing ?? []).map((m) => (typeof m === 'string' ? { question: m, options: [] } : m))
+			: []
+	);
 	let tab = $state<'thread' | 'prep'>('thread');
 	let retrying = $state(false);
 	const latest = $derived(
@@ -88,11 +96,15 @@
 					onretry={item.kind === 'agent' ? retryAgent(item.agent, i) : undefined}
 				/>
 			{/each}
-			{#if busy}
+			{#if captcha}
+				<Handoff caseId={c.case_id} />
+			{:else if busy}
 				<div class="typing row">
 					<AgentAvatar name={busy} size={24} />
 					<span class="pulse muted">{agent(busy).title} {agent(busy).doing}…</span>
 				</div>
+			{:else if missing.length && detail.retryable.includes('clerk')}
+				<MissingFacts caseId={c.case_id} questions={missing} />
 			{/if}
 		{/if}
 	</div>

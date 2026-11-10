@@ -7,13 +7,28 @@ from langgraph.store.base import BaseStore
 from pydantic import BaseModel, Field
 
 from findmeajob.agents.deps import Deps
-from findmeajob.llm import ask
+from findmeajob.events import broker
+from findmeajob.llm import LOW_EFFORT, ask
 from findmeajob.memory import now, profile_context, set_status
 from findmeajob.state import CaseState, posting_text
 from findmeajob.tools.browser import Blocked
+from findmeajob.tools.chrome import FILL_TIMEOUT_SECONDS, NETWORK_HICCUPS
+from findmeajob.tools.jobs.employer import AGGREGATORS
 from findmeajob.tools.jobs.listing import html_to_text
 
 SALARY_FIELD = re.compile(r"salary|compensation|pay|remuneration|expected", re.I)
+REFERRAL = re.compile(
+    r"friend|referral|someone else|how did you hear|hear about|diversity|equal opportunity|"
+    r"gender|race|ethnic|veteran|disability|pronoun",
+    re.I,
+)
+TRANSIENT = (
+    "has been closed",
+    "Target closed",
+    "frame was detached",
+    "Execution context was destroyed",
+    *NETWORK_HICCUPS,
+)
 MAX_STEPS = 10
 MAX_VALIDATION_RETRIES = 2
 
@@ -24,8 +39,18 @@ SYSTEM = (
     "For market or role questions, answer from public industry knowledge. For behavioural questions, tell a "
     "profile story or the closest real experience from the CV; never invent events, skills, employers, or dates. "
     "For a select or radio field, the value must be one of its option labels. For a checkbox, answer yes or no. "
+    "A field with examples has more options than listed: answer with the option you want, written like the "
+    "examples. A country field whose examples carry dialling codes belongs to the phone number, so pick the "
+    "phone number's country. "
     "Use YYYY-MM-DD for date fields unless the label explicitly requests another format. "
-    "Skip file fields. Set grounded to false only when a personal fact the form asks for is absent from the profile."
+    "A referral, friend, how-did-you-hear, or equal-opportunity question is not a personal fact: leave it blank "
+    "and set grounded to true. Skip file fields. Set grounded to false only when a personal fact the form asks "
+    "for, such as the candidate's own name, email, phone, or work authorization, is absent from the profile. "
+    "A personal fact the profile and CV clearly imply counts as present: for example, someone whose location, "
+    "employers, and education are all outside the US, with no US ties, is not a US person. Ask only when the "
+    "evidence is missing or mixed. "
+    "The candidate's answers to past form questions are personal facts. Reuse one when it answers the same "
+    "question; if it depends on the job's location, reuse it only when this job is in the same place."
 )
 
 
@@ -77,14 +102,27 @@ async def answer(
         f"Industry salary range: {salary.model_dump_json() if salary else 'not needed'}\n\n"
         f"Validation errors to correct: {json.dumps(errors or [])}"
     )
-    answers = await ask(deps.model, FormAnswers, SYSTEM, user)
+    answers = await ask(deps.model, FormAnswers, SYSTEM, user, LOW_EFFORT)
     return [a.model_dump() for a in answers.answers], salary
 
 
-def missing_facts(fields: list[dict[str, Any]], answers: list[dict[str, Any]]) -> list[str]:
-    required = {field["id"]: field["label"] for field in fields if field.get("required") and field["type"] != "file"}
+def missing_facts(fields: list[dict[str, Any]], answers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     answered = {answer["field_id"]: answer for answer in answers}
-    return [label for field_id, label in required.items() if not answered.get(field_id, {}).get("grounded")]
+    missing = []
+    for field in fields:
+        if not field.get("required") or field["type"] == "file" or REFERRAL.search(field["label"]):
+            continue
+        answer = answered.get(field["id"])
+        if answer and answer.get("grounded"):
+            continue
+        options = [option["label"] for option in field.get("options", []) if option["label"]]
+        missing.append({"question": field["label"], "options": options})
+    return missing
+
+
+def transient(error: Exception) -> bool:
+    text = str(error)
+    return any(token in text for token in TRANSIENT)
 
 
 async def run(state: CaseState, deps: Deps, store: BaseStore) -> dict[str, Any]:
@@ -96,72 +134,94 @@ async def run(state: CaseState, deps: Deps, store: BaseStore) -> dict[str, Any]:
             "application": {**application, "blocked": "chrome isn't set up, so clerk can't fill anything."},
             "stage": "blocked",
         }
-    try:
-        async with deps.chrome.fill_form(url) as session:
-            steps: list[dict[str, Any]] = []
-            all_fields: list[dict[str, Any]] = []
-            all_answers: list[dict[str, Any]] = []
-            salary: SalaryRange | None = None
-            repeats: dict[str, int] = {}
-            validation_errors: list[str] = []
-            validation_retries = 0
-            for step_number in range(1, MAX_STEPS + 1):
-                fields = await session.fields()
-                signature = json.dumps([(field["type"], field["label"]) for field in fields])
-                repeats[signature] = repeats.get(signature, 0) + 1
-                if repeats[signature] > MAX_VALIDATION_RETRIES + 1:
-                    raise Blocked("the form got stuck on the same step after multiple fixes.")
+    if not posting.get("apply_url"):
+        employer = await deps.employer_apply_url(posting)
+        if employer:
+            url = application["url"] = employer
+        elif posting.get("source") in AGGREGATORS:
+            stuck = "this job board lists no apply link for the role. its posting says how to apply, so check it."
+            return {"application": {**application, "blocked": stuck}, "stage": "blocked"}
 
-                answers: list[dict[str, Any]] = []
-                if fields:
-                    answers, salary = await answer(deps, store, state, fields, salary, validation_errors)
-                    missing = missing_facts(fields, answers)
-                    if missing:
-                        raise Blocked(
-                            f"your profile is missing {', '.join(missing)}. add it and retry, we don't invent stuff."
-                        )
-                    await session.fill(
-                        fields, {item["field_id"]: item["value"] for item in answers}, Path(state["cv"]["pdf"])
-                    )
-                outcome = await session.advance()
-                steps.append(
-                    {
-                        "number": step_number,
-                        "fields": fields,
-                        "answers": answers,
-                        "outcome": outcome["status"],
-                        "errors": outcome.get("errors", []),
-                    }
-                )
-                if outcome["status"] == "validation":
-                    validation_retries += 1
-                    if validation_retries > MAX_VALIDATION_RETRIES:
-                        raise Blocked("the form kept rejecting its answers: " + "; ".join(outcome["errors"])[:240])
-                    validation_errors = outcome["errors"]
-                    continue
+    def notify(waiting: bool) -> None:
+        broker.publish("captcha", case_id=state["case_id"], waiting=waiting)
 
-                validation_errors = []
+    for attempt in (1, 2):
+        try:
+            async with deps.chrome.fill_form(url, state["case_id"], notify) as session:
+                steps: list[dict[str, Any]] = []
+                all_fields: list[dict[str, Any]] = []
+                all_answers: list[dict[str, Any]] = []
+                salary: SalaryRange | None = None
+                repeats: dict[str, int] = {}
+                validation_errors: list[str] = []
                 validation_retries = 0
-                all_fields.extend(fields)
-                all_answers.extend(answers)
-                if outcome["status"] == "submitted":
-                    application["confirmation"] = outcome["confirmation"]
-                    break
-                if outcome["status"] == "unconfirmed":
-                    raise Blocked("the form was sent, but the site did not show a reliable confirmation.")
-            else:
-                raise Blocked(f"the application exceeded {MAX_STEPS} steps, so Clerk stopped safely.")
-            application.update(
-                fields=all_fields,
-                answers=all_answers,
-                salary=salary.model_dump() if salary else None,
-                steps=steps,
-            )
-    except Blocked as reason:
-        await set_status(store, "chrome", True, f"Blocked on {url}")
-        return {"application": {**application, "blocked": str(reason)}, "stage": "blocked"}
-    except Exception as error:
-        await set_status(store, "chrome", False, f"chrome crashed out: {error}"[:300])
-        return {"application": {**application, "blocked": f"chrome crashed out: {error}"}, "stage": "blocked"}
+                for step_number in range(1, MAX_STEPS + 1):
+                    fields = await session.fields()
+                    signature = json.dumps([(field["type"], field["label"]) for field in fields])
+                    repeats[signature] = repeats.get(signature, 0) + 1
+                    if repeats[signature] > MAX_VALIDATION_RETRIES + 1:
+                        raise Blocked("the form got stuck on the same step after multiple fixes.")
+
+                    answers: list[dict[str, Any]] = []
+                    if fields:
+                        answers, salary = await answer(deps, store, state, fields, salary, validation_errors)
+                        missing = missing_facts(fields, answers)
+                        if missing:
+                            application["missing"] = missing
+                            joined = ", ".join(item["question"] for item in missing)
+                            raise Blocked(f"your profile is missing {joined}. add it and retry, we don't invent stuff.")
+                        proven = {
+                            item["field_id"]: item["value"]
+                            for item in answers
+                            if item.get("grounded") and item["value"]
+                        }
+                        await session.fill(fields, proven, Path(state["cv"]["pdf"]))
+                    outcome = await session.advance()
+                    steps.append(
+                        {
+                            "number": step_number,
+                            "fields": fields,
+                            "answers": answers,
+                            "outcome": outcome["status"],
+                            "errors": outcome.get("errors", []),
+                        }
+                    )
+                    if outcome["status"] == "validation":
+                        validation_retries += 1
+                        if validation_retries > MAX_VALIDATION_RETRIES:
+                            raise Blocked("the form kept rejecting its answers: " + "; ".join(outcome["errors"])[:240])
+                        validation_errors = outcome["errors"]
+                        continue
+
+                    validation_errors = []
+                    validation_retries = 0
+                    all_fields.extend(fields)
+                    all_answers.extend(answers)
+                    if outcome["status"] == "submitted":
+                        application["confirmation"] = outcome["confirmation"]
+                        break
+                    if outcome["status"] == "unconfirmed":
+                        raise Blocked("the form was sent, but the site did not show a reliable confirmation.")
+                else:
+                    raise Blocked(f"the application exceeded {MAX_STEPS} steps, so Clerk stopped safely.")
+                application.update(
+                    fields=all_fields,
+                    answers=all_answers,
+                    salary=salary.model_dump() if salary else None,
+                    steps=steps,
+                )
+            break
+        except Blocked as reason:
+            await set_status(store, "chrome", True, f"Blocked on {url}")
+            return {"application": {**application, "blocked": str(reason)}, "stage": "blocked"}
+        except TimeoutError:
+            stuck = f"the page stopped responding for {FILL_TIMEOUT_SECONDS // 60} minutes, so Clerk let go. retry it."
+            await set_status(store, "chrome", False, stuck)
+            return {"application": {**application, "blocked": stuck}, "stage": "blocked"}
+        except Exception as error:
+            if attempt == 1 and transient(error):
+                continue
+            await set_status(store, "chrome", False, f"chrome crashed out: {error}"[:300])
+            return {"application": {**application, "blocked": f"chrome crashed out: {error}"}, "stage": "blocked"}
     await set_status(store, "chrome", True, f"Submitted {url}")
     return {"application": application, "stage": "applied"}

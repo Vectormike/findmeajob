@@ -30,6 +30,10 @@ def case_id_for(*parts: str) -> str:
     return hashlib.sha1("|".join(part.strip().lower() for part in parts).encode()).hexdigest()[:12]
 
 
+def job_key(company: str, title: str) -> str:
+    return f"{company.strip().lower()}|{title.strip().lower()}"
+
+
 def _detail(found: int, opened: int, rediscovered: int, skill: str, region: str, arrangement: str) -> str:
     fresh = "none new" if opened == 0 else f"{opened} new"
     familiar = f", {rediscovered} already here" if rediscovered else ""
@@ -37,6 +41,10 @@ def _detail(found: int, opened: int, rediscovered: int, skill: str, region: str,
 
 
 async def _fill(workflow: Workflow, listing: Listing, posting: dict[str, Any]) -> None:
+    try:
+        posting["logo"] = await workflow.deps.company_logo(posting)
+    except Exception:
+        log.warning("Could not find a logo for %s", listing.company)
     if len(listing.description) >= SHORT_DESCRIPTION:
         return
     try:
@@ -71,7 +79,9 @@ async def run(
     run_id = now()
     broker.publish("working", case_id="", agent="scout", detail=f"{skill} / {region} / {arrangement}")
     skip = (await read_profile(workflow.store))["skip_companies"]
-    stored = {case["key"] for case in await list_values(workflow.store, CASES)}
+    cases = await list_values(workflow.store, CASES)
+    stored = {case["key"] for case in cases}
+    known = {job_key(case.get("company", ""), case.get("title", "")): case["key"] for case in cases}
     existing = set(stored)
     rediscovered: list[str] = []
     picked: list[tuple[str, dict[str, Any], Listing]] = []
@@ -83,7 +93,9 @@ async def run(
             for listing in listings:
                 if len(picked) + len(batch) >= limit:
                     break
-                case_id = case_id_for(region, skill, arrangement, listing.company, listing.title)
+                case_id = known.get(job_key(listing.company, listing.title)) or case_id_for(
+                    region, skill, arrangement, listing.company, listing.title
+                )
                 if is_skipped(listing.company, skip):
                     continue
                 if case_id in stored:
@@ -140,5 +152,9 @@ async def add_link(workflow: Workflow, url: str) -> str:
     case_id = case_id_for(url)
     if not await workflow.store.aget(CASES, case_id):
         details = {**posting.model_dump(), "url": url, "source": "link"}
+        try:
+            details["logo"] = await workflow.deps.company_logo(details)
+        except Exception:
+            log.warning("Could not find a logo for %s", details["company"])
         await workflow.start(case_id, {**details, "apply_url": details["apply_url"] or url}, {})
     return case_id

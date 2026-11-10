@@ -1,5 +1,8 @@
+import httpx
+
 from findmeajob.agents.clerk import FieldAnswer, FormAnswers
 from findmeajob.tools.browser_ats import GENERIC, strategy_for
+from findmeajob.tools.jobs.employer import _match, employer_apply_url
 from tests.conftest import FILTERS, POSTING
 from tests.fakes import FIELDS, FakeChrome
 
@@ -94,6 +97,97 @@ async def test_clerk_stops_a_repeating_form(workflow, deps):
 
     assert case["stage"] == "blocked"
     assert "stuck on the same step" in case["application"]["blocked"]
+
+
+async def test_clerk_leaves_a_referral_blank_and_continues(workflow, deps):
+    deps.chrome = FakeChrome(
+        steps=[
+            [
+                {"id": "f0", "type": "text", "label": "Full name", "required": True},
+                {"id": "f1", "type": "text", "label": "Type the email of your friend", "required": True},
+            ]
+        ]
+    )
+    deps.model.form_answers = [
+        answers(("f0", "Ada Lovelace"), ("f1", "friend@example.com")),
+    ]
+    deps.model.form_answers[0].answers[1].grounded = False
+
+    case = await run_case(workflow)
+
+    assert case["stage"] == "applied"
+    assert deps.chrome.filled == {"f0": "Ada Lovelace"}
+
+
+async def test_clerk_retries_once_when_the_browser_closes(workflow, deps):
+    deps.chrome.crashes = [RuntimeError("Page.goto: net::ERR_NETWORK_CHANGED at https://jobicy.com/jobs/1")]
+
+    case = await run_case(workflow)
+
+    assert case["stage"] == "applied"
+    assert deps.chrome.filled["f0"] == "Ada Lovelace"
+
+
+async def test_clerk_blocks_when_the_browser_closes_twice(workflow, deps):
+    deps.chrome.crashes = [
+        RuntimeError("Target page, context or browser has been closed"),
+        RuntimeError("Target page, context or browser has been closed"),
+    ]
+
+    case = await run_case(workflow)
+
+    assert case["stage"] == "blocked"
+    assert "has been closed" in case["application"]["blocked"]
+
+
+async def test_clerk_lets_go_of_a_page_that_stops_responding(workflow, deps):
+    deps.chrome.crashes = [TimeoutError()]
+
+    case = await run_case(workflow)
+
+    assert case["stage"] == "blocked"
+    assert "stopped responding" in case["application"]["blocked"]
+
+
+async def test_clerk_applies_on_the_employers_own_board(workflow, deps):
+    async def employer_board(posting: dict) -> str:
+        assert (posting["company"], posting["title"]) == ("Acme", "Backend Engineer")
+        return "https://job-boards.greenhouse.io/acme/jobs/1"
+
+    deps.employer_apply_url = employer_board
+
+    case = await run_case(workflow)
+
+    assert case["stage"] == "applied"
+    assert case["application"]["url"] == "https://job-boards.greenhouse.io/acme/jobs/1"
+
+
+async def test_clerk_wont_fill_a_job_board_page_without_an_apply_link(workflow):
+    await workflow.start("board-case", {**POSTING, "source": "myjobmag"}, FILTERS)
+    case = await workflow.case("board-case")
+
+    assert case["stage"] == "blocked"
+    assert "no apply link" in case["application"]["blocked"]
+
+
+async def test_a_myjobmag_posting_resolves_to_its_apply_link(monkeypatch):
+    page = '<a href="/subscribe">Alerts</a><a href="/apply-now/42">Acme on careers.acme.com</a>'
+
+    async def get(self, url):
+        return httpx.Response(200, text=page, request=httpx.Request("GET", url))
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", get)
+    posting = {"source": "myjobmag", "url": "https://www.myjobmag.com/job/backend-acme", "company": "Acme"}
+
+    assert await employer_apply_url(posting) == "https://www.myjobmag.com/apply-now/42"
+
+
+def test_employer_board_matches_one_title():
+    jobs = [{"title": "Backend Engineer III (London)"}, {"title": "Frontend Engineer"}]
+
+    assert _match(jobs, "title", "Backend Engineer III") == jobs[0]
+    assert _match(jobs + [{"title": "Backend Engineer III (Remote)"}], "title", "Backend Engineer III") is None
+    assert _match(jobs, "title", "Backend Engineer") is None
 
 
 def test_common_ats_hosts_get_a_strategy():

@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { CalendarCheck, CircleCheck, Inbox as InboxIcon, MailCheck, Send } from '@lucide/svelte';
+	import { CalendarCheck, CircleAlert, CircleCheck, Inbox as InboxIcon, MailCheck, Send } from '@lucide/svelte';
 	import { agent } from '#lib/agents.ts';
 	import { api, type CaseRow, type Inbox } from '#lib/api.ts';
 	import { ago, initials } from '#lib/format.ts';
@@ -22,12 +22,14 @@
 
 	const groups = [
 		{ key: 'all', label: 'All open', icon: InboxIcon },
+		{ key: 'needs_you', label: 'Needs you', icon: CircleAlert },
 		{ key: 'applied', label: 'Applied', icon: Send },
 		{ key: 'acknowledged', label: 'Acknowledged', icon: MailCheck },
 		{ key: 'interview', label: 'Interview', icon: CalendarCheck },
 		{ key: 'debrief', label: 'Debrief', icon: CircleCheck }
 	];
 	const STAGES: Record<string, string[]> = {
+		needs_you: ['blocked'],
 		applied: ['applied'],
 		acknowledged: ['acknowledged', 'in_conversation'],
 		interview: ['interview'],
@@ -51,7 +53,9 @@
 	<button class="case" class:selected={selected === c.key} onclick={() => onselect(c.key)}>
 		<div class="row between">
 			<span class="row"><span class="logo">{initials(c.company)}</span><b>{c.company}</b></span>
-			{#if busy}
+			{#if live.captcha[c.key] ?? c.captcha}
+				<span class="small needs">Needs you</span>
+			{:else if busy}
 				<span class="pulse small working">{agent(busy).title}'s on it</span>
 			{:else if c.error}
 				<Badge value="error" />
@@ -177,6 +181,13 @@
 	}
 	.pinned {
 		margin-bottom: 4px;
+	}
+	.needs {
+		padding: 1px 8px;
+		border-radius: 999px;
+		background: var(--amber-bg);
+		color: var(--amber);
+		font-weight: 600;
 	}
 	.case {
 		width: 100%;
