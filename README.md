@@ -2,33 +2,27 @@
 
 A workflow of agents that finds jobs, rewrites your CV for the posting, applies, and tracks each case through the debrief.
 
-## Flow
+## The dashboard
 
-Start with a CV. Scout opens a case for each listing. Judge keeps or skips it, Tailor rewrites the CV, and Clerk fills the form. The case then stays in the inbox for mail, interview prep, the debrief, and replies you approve.
+Cases is the board. Pick a region, a career, and an arrangement, then sweep. Scout lists every job with Judge's verdict, the place, and how old the posting is. Worth applying and Needs you narrow the pile. Paste a link when you already have one.
+
+![The Cases board, with Judge's verdict on each job](docs/screenshots/cases.png)
+
+Open a case and the inbox keeps the thread. Scout found it, Judge wrote the fit note, Tailor rewrote the CV, and Clerk submitted.
+
+![A Busha case that Clerk already applied to](docs/screenshots/inbox.png)
+
+### Agents
+
+Judge writes the fit note. Tailor cooks the CV. Clerk submits. Courier reads the mail, Brief prepares the interview, Critic writes the debrief, Chaser drafts the reply, and Archivist files what to remember.
+
+![The nine agents and what each one does](docs/screenshots/agents.png)
 
 ### Profile
 
 Drop in a CV. The form fills from it, and every later agent reads that profile.
 
 ![Profile, with a CV uploaded and the form filled from it](docs/screenshots/profile.png)
-
-### Scout
-
-Pick a region, a career, and an arrangement, then sweep. Each new listing becomes a case.
-
-![Cases, with Scout sweeping and the pile of listings](docs/screenshots/cases.png)
-
-### The agents
-
-Judge writes the fit note. Tailor cooks the CV. Clerk submits. Courier reads the mail, Brief prepares the interview, Critic writes the debrief, Chaser drafts the reply, and Archivist files what to remember.
-
-![The nine agents and what each one does](docs/screenshots/agents.png)
-
-### One case
-
-Scout opens it, Judge says apply or skip, and Tailor lists what changed on the CV. When a recruiter writes back, the thread continues here.
-
-![A Payzeep case from Scout through the tailored CV](docs/screenshots/inbox.png)
 
 ### Integrations
 
