@@ -96,6 +96,26 @@ async def test_clerk_stops_a_repeating_form(workflow, deps):
     assert "stuck on the same step" in case["application"]["blocked"]
 
 
+async def test_clerk_leaves_a_referral_blank_and_continues(workflow, deps):
+    deps.chrome = FakeChrome(
+        steps=[
+            [
+                {"id": "f0", "type": "text", "label": "Full name", "required": True},
+                {"id": "f1", "type": "text", "label": "Type the email of your friend", "required": True},
+            ]
+        ]
+    )
+    deps.model.form_answers = [
+        answers(("f0", "Ada Lovelace"), ("f1", "friend@example.com")),
+    ]
+    deps.model.form_answers[0].answers[1].grounded = False
+
+    case = await run_case(workflow)
+
+    assert case["stage"] == "applied"
+    assert deps.chrome.filled == {"f0": "Ada Lovelace"}
+
+
 async def test_clerk_retries_once_when_the_browser_closes(workflow, deps):
     deps.chrome.crashes = [RuntimeError("Page.goto: net::ERR_NETWORK_CHANGED at https://jobicy.com/jobs/1")]
 

@@ -10,6 +10,7 @@
 	import Bubble from './Bubble.svelte';
 	import Composer from './Composer.svelte';
 	import Handoff from './Handoff.svelte';
+	import MissingFacts from './MissingFacts.svelte';
 	import Prep from './Prep.svelte';
 
 	let {
@@ -21,6 +22,11 @@
 	const items = $derived(timeline(c));
 	const busy = $derived(live.working[c.case_id]);
 	const captcha = $derived(live.captcha[c.case_id] ?? detail.captcha);
+	const missing = $derived(
+		c.stage === 'blocked'
+			? (c.application?.missing ?? []).map((m) => (typeof m === 'string' ? { question: m, options: [] } : m))
+			: []
+	);
 	let tab = $state<'thread' | 'prep'>('thread');
 	let retrying = $state(false);
 	const latest = $derived(
@@ -97,6 +103,8 @@
 					<AgentAvatar name={busy} size={24} />
 					<span class="pulse muted">{agent(busy).title} {agent(busy).doing}…</span>
 				</div>
+			{:else if missing.length && detail.retryable.includes('clerk')}
+				<MissingFacts caseId={c.case_id} questions={missing} />
 			{/if}
 		{/if}
 	</div>

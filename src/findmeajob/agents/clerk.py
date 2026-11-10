@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 from findmeajob.agents.deps import Deps
 from findmeajob.events import broker
-from findmeajob.llm import ask
+from findmeajob.llm import LOW_EFFORT, ask
 from findmeajob.memory import now, profile_context, set_status
 from findmeajob.state import CaseState, posting_text
 from findmeajob.tools.browser import Blocked
@@ -16,6 +16,11 @@ from findmeajob.tools.chrome import FILL_TIMEOUT_SECONDS, NETWORK_HICCUPS
 from findmeajob.tools.jobs.listing import html_to_text
 
 SALARY_FIELD = re.compile(r"salary|compensation|pay|remuneration|expected", re.I)
+REFERRAL = re.compile(
+    r"friend|referral|someone else|how did you hear|hear about|diversity|equal opportunity|"
+    r"gender|race|ethnic|veteran|disability|pronoun",
+    re.I,
+)
 TRANSIENT = (
     "has been closed",
     "Target closed",
@@ -33,8 +38,18 @@ SYSTEM = (
     "For market or role questions, answer from public industry knowledge. For behavioural questions, tell a "
     "profile story or the closest real experience from the CV; never invent events, skills, employers, or dates. "
     "For a select or radio field, the value must be one of its option labels. For a checkbox, answer yes or no. "
+    "A field with examples has more options than listed: answer with the option you want, written like the "
+    "examples. A country field whose examples carry dialling codes belongs to the phone number, so pick the "
+    "phone number's country. "
     "Use YYYY-MM-DD for date fields unless the label explicitly requests another format. "
-    "Skip file fields. Set grounded to false only when a personal fact the form asks for is absent from the profile."
+    "A referral, friend, how-did-you-hear, or equal-opportunity question is not a personal fact: leave it blank "
+    "and set grounded to true. Skip file fields. Set grounded to false only when a personal fact the form asks "
+    "for, such as the candidate's own name, email, phone, or work authorization, is absent from the profile. "
+    "A personal fact the profile and CV clearly imply counts as present: for example, someone whose location, "
+    "employers, and education are all outside the US, with no US ties, is not a US person. Ask only when the "
+    "evidence is missing or mixed. "
+    "The candidate's answers to past form questions are personal facts. Reuse one when it answers the same "
+    "question; if it depends on the job's location, reuse it only when this job is in the same place."
 )
 
 
@@ -86,14 +101,22 @@ async def answer(
         f"Industry salary range: {salary.model_dump_json() if salary else 'not needed'}\n\n"
         f"Validation errors to correct: {json.dumps(errors or [])}"
     )
-    answers = await ask(deps.model, FormAnswers, SYSTEM, user)
+    answers = await ask(deps.model, FormAnswers, SYSTEM, user, LOW_EFFORT)
     return [a.model_dump() for a in answers.answers], salary
 
 
-def missing_facts(fields: list[dict[str, Any]], answers: list[dict[str, Any]]) -> list[str]:
-    required = {field["id"]: field["label"] for field in fields if field.get("required") and field["type"] != "file"}
+def missing_facts(fields: list[dict[str, Any]], answers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     answered = {answer["field_id"]: answer for answer in answers}
-    return [label for field_id, label in required.items() if not answered.get(field_id, {}).get("grounded")]
+    missing = []
+    for field in fields:
+        if not field.get("required") or field["type"] == "file" or REFERRAL.search(field["label"]):
+            continue
+        answer = answered.get(field["id"])
+        if answer and answer.get("grounded"):
+            continue
+        options = [option["label"] for option in field.get("options", []) if option["label"]]
+        missing.append({"question": field["label"], "options": options})
+    return missing
 
 
 def transient(error: Exception) -> bool:
@@ -135,11 +158,15 @@ async def run(state: CaseState, deps: Deps, store: BaseStore) -> dict[str, Any]:
                         answers, salary = await answer(deps, store, state, fields, salary, validation_errors)
                         missing = missing_facts(fields, answers)
                         if missing:
-                            joined = ", ".join(missing)
+                            application["missing"] = missing
+                            joined = ", ".join(item["question"] for item in missing)
                             raise Blocked(f"your profile is missing {joined}. add it and retry, we don't invent stuff.")
-                        await session.fill(
-                            fields, {item["field_id"]: item["value"] for item in answers}, Path(state["cv"]["pdf"])
-                        )
+                        proven = {
+                            item["field_id"]: item["value"]
+                            for item in answers
+                            if item.get("grounded") and item["value"]
+                        }
+                        await session.fill(fields, proven, Path(state["cv"]["pdf"]))
                     outcome = await session.advance()
                     steps.append(
                         {

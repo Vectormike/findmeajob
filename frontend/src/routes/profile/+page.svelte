@@ -108,6 +108,20 @@
 				<p class="small faint">No roles yet. Upload a CV and they show up here.</p>
 			{/each}
 
+			{#if profile.form_facts.length}
+				<b>Form answers</b>
+				<p class="small faint">Answers you gave when Clerk asked. Clerk reuses them on later forms.</p>
+				{#each profile.form_facts as fact, i (i)}
+					<div class="story">
+						<div class="row between">
+							<span class="small muted">{fact.question}{fact.job ? ` · ${fact.job}` : ''}</span>
+							<button type="button" class="icon-btn" aria-label="Remove answer" onclick={() => profile?.form_facts.splice(i, 1)}><Trash2 size={14} /></button>
+						</div>
+						<input bind:value={fact.answer} />
+					</div>
+				{/each}
+			{/if}
+
 			<div class="row save">
 				{#if note}<span class="small muted">{note}</span>{/if}
 				<button class="btn primary" disabled={saving}>{saving ? 'Saving…' : 'Save profile'}</button>

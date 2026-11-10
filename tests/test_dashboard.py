@@ -1,3 +1,4 @@
+import asyncio
 from io import BytesIO
 from pathlib import Path
 
@@ -91,6 +92,31 @@ def test_live_view_relays_a_person_on_a_captcha(deps, tmp_path):
             assert http.post("/api/cases/c1/live", json=action).status_code == 200
         assert page.actions == [("click", 500, 100), ("type", "ada"), ("key", "Enter"), ("scroll", 300)]
         assert http.post("/api/cases/c1/live", json={"kind": "key", "key": "F12"}).status_code == 422
+
+
+def test_answering_what_clerk_missed_saves_it_and_reruns_clerk(deps, tmp_path):
+    deps.model.grounded = False
+    with client(deps, tmp_path) as http:
+        workflow = http.app.state.workflow
+        http.portal.call(workflow.start, "c1", POSTING, FILTERS)
+        case = http.get("/api/cases/c1").json()["case"]
+        assert case["stage"] == "blocked"
+        assert case["application"]["missing"] == [{"question": "Full name", "options": []}]
+        assert http.get("/api/inbox").json()["counts"]["needs_you"] == 1
+
+        deps.model.grounded = True
+        facts = {"facts": [{"question": "Full name", "answer": "Ada Lovelace"}]}
+        assert http.post("/api/cases/c1/facts", json=facts).status_code == 202
+        for _ in range(100):
+            if http.get("/api/cases/c1").json()["case"]["stage"] == "applied":
+                break
+            http.portal.call(asyncio.sleep, 0.05)
+
+        assert http.get("/api/cases/c1").json()["case"]["stage"] == "applied"
+        saved = http.get("/api/profile").json()["profile"]["form_facts"]
+        assert saved == [{"question": "Full name", "answer": "Ada Lovelace", "job": "Acme, Berlin"}]
+        assert "Full name (asked by Acme, Berlin): Ada Lovelace" in deps.model.prompts[-1]
+        assert http.post("/api/cases/c1/facts", json={"facts": []}).status_code == 422
 
 
 def test_integrations_have_working_health_checks(deps, tmp_path):

@@ -8,7 +8,7 @@ from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.base import BaseStore
 from langgraph.store.memory import InMemoryStore
 from langgraph.store.postgres.aio import AsyncPostgresStore
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from findmeajob.config import Settings
 from findmeajob.events import broker
@@ -26,6 +26,12 @@ class Story(BaseModel):
     text: str
 
 
+class FormFact(BaseModel):
+    question: str = Field(min_length=1, max_length=300)
+    answer: str = Field(min_length=1, max_length=500)
+    job: str = ""
+
+
 class Profile(BaseModel):
     name: str = ""
     email: str = ""
@@ -37,6 +43,7 @@ class Profile(BaseModel):
     work_authorization: str = ""
     skip_companies: list[str] = []
     stories: list[Story] = []
+    form_facts: list[FormFact] = []
     master_cv: str = ""
     master_cv_file: str = ""
 
@@ -95,10 +102,15 @@ async def accepted_lessons(store: BaseStore) -> list[str]:
 def profile_text(profile: dict[str, Any], lessons: list[str]) -> str:
     stories = "\n\n".join(f"- {story['title']}: {story['text']}" for story in profile["stories"])
     lesson_lines = "\n".join(f"- {lesson}" for lesson in lessons) or "- none"
+    facts = "\n".join(
+        f"- {fact['question']} (asked by {fact['job'] or 'a past job'}): {fact['answer']}"
+        for fact in profile["form_facts"]
+    )
     return (
         f"Name: {profile['name']}\nEmail: {profile['email']}\nPhone: {profile['phone']}\n"
         f"Location: {profile['location']}\nLinks: {profile['links']}\nTitles: {profile['titles']}\n"
         f"Skills: {', '.join(profile['skills'])}\nWork authorization: {profile['work_authorization']}\n\n"
+        f"Answers the candidate gave to form questions:\n{facts or '- none'}\n\n"
         f"Stories:\n{stories or '- none'}\n\nLessons from past interviews:\n{lesson_lines}\n\n"
         f"Master CV:\n{profile['master_cv']}"
     )

@@ -2,7 +2,9 @@ import operator
 from typing import Annotated, Any, TypedDict
 
 OPEN_STAGES = ("applied", "acknowledged", "in_conversation", "interview", "debriefed", "offer")
+INBOX_STAGES = (*OPEN_STAGES, "blocked")
 STAGE_GROUPS = {
+    "needs_you": ("blocked",),
     "applied": ("applied",),
     "acknowledged": ("acknowledged", "in_conversation"),
     "interview": ("interview",),

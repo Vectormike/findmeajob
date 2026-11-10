@@ -7,8 +7,8 @@ from playwright.async_api import Error as PlaywrightError
 from pydantic import BaseModel, Field
 
 from findmeajob.agents import inbox, scout
-from findmeajob.memory import UNMATCHED, list_values
-from findmeajob.state import OPEN_STAGES, STAGE_GROUPS
+from findmeajob.memory import UNMATCHED, FormFact, list_values, read_profile, write_profile
+from findmeajob.state import INBOX_STAGES, STAGE_GROUPS
 from findmeajob.tools.jobs.listing import ARRANGEMENTS
 from findmeajob.tools.jobs.regions import groups
 from findmeajob.web.common import all_cases, background, case_detail, statuses, workflow_of
@@ -35,6 +35,10 @@ class Assignment(BaseModel):
     case_id: str
 
 
+class Facts(BaseModel):
+    facts: list[FormFact] = Field(min_length=1, max_length=20)
+
+
 class LiveAction(BaseModel):
     kind: Literal["click", "type", "key", "scroll"]
     x: float = Field(0, ge=0, le=1)
@@ -57,7 +61,7 @@ async def inbox_view(request: Request) -> dict[str, Any]:
     workflow = workflow_of(request)
     live = workflow.deps.chrome.live if workflow.deps.chrome else {}
     cases = [
-        {**c, "captcha": c["key"] in live} for c in await all_cases(workflow) if c.get("stage") in OPEN_STAGES
+        {**c, "captcha": c["key"] in live} for c in await all_cases(workflow) if c.get("stage") in INBOX_STAGES
     ]
     counts = {group: sum(c["stage"] in stages for c in cases) for group, stages in STAGE_GROUPS.items()}
     return {"cases": cases, "counts": counts, "unmatched": await list_values(workflow.store, UNMATCHED)}
@@ -139,6 +143,21 @@ async def retry_agent(request: Request, case_id: str, agent: str) -> dict[str, s
         raise HTTPException(409, f"{agent} can't be retried on this case right now.")
     background(request, workflow.rerun(case_id, agent))
     return {"status": "running"}
+
+
+@router.post("/cases/{case_id}/facts", status_code=202)
+async def add_facts(request: Request, case_id: str, facts: Facts) -> dict[str, str]:
+    workflow = workflow_of(request)
+    if "clerk" not in await workflow.retryable(case_id):
+        raise HTTPException(409, "clerk can't be retried on this case right now.")
+    posting = (await workflow.case(case_id))["posting"]
+    job = ", ".join(part for part in (posting.get("company"), posting.get("location")) if part)
+    answered = {fact.question for fact in facts.facts}
+    profile = await read_profile(workflow.store)
+    kept = [f for f in profile["form_facts"] if not (f["question"] in answered and f["job"] == job)]
+    added = [{**fact.model_dump(), "job": job} for fact in facts.facts]
+    await write_profile(workflow.store, {**profile, "form_facts": [*kept, *added]})
+    return await retry_agent(request, case_id, "clerk")
 
 
 @router.get("/cases/{case_id}/live.jpg")

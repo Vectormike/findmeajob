@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { CalendarCheck, CircleCheck, Inbox as InboxIcon, MailCheck, Send } from '@lucide/svelte';
+	import { CalendarCheck, CircleAlert, CircleCheck, Inbox as InboxIcon, MailCheck, Send } from '@lucide/svelte';
 	import { agent } from '#lib/agents.ts';
 	import { api, type CaseRow, type Inbox } from '#lib/api.ts';
 	import { ago, initials } from '#lib/format.ts';
@@ -22,12 +22,14 @@
 
 	const groups = [
 		{ key: 'all', label: 'All open', icon: InboxIcon },
+		{ key: 'needs_you', label: 'Needs you', icon: CircleAlert },
 		{ key: 'applied', label: 'Applied', icon: Send },
 		{ key: 'acknowledged', label: 'Acknowledged', icon: MailCheck },
 		{ key: 'interview', label: 'Interview', icon: CalendarCheck },
 		{ key: 'debrief', label: 'Debrief', icon: CircleCheck }
 	];
 	const STAGES: Record<string, string[]> = {
+		needs_you: ['blocked'],
 		applied: ['applied'],
 		acknowledged: ['acknowledged', 'in_conversation'],
 		interview: ['interview'],
