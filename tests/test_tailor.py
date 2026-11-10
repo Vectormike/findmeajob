@@ -44,6 +44,13 @@ def test_cv_html_drops_em_dashes():
     )
 
 
+def test_escaped_newlines_from_the_model_never_reach_the_cv():
+    html = clean_html("<h1>Ada</h1>\\n<ul>\\n<li>Built payments\\nat scale</li>\\n</ul>")
+
+    assert "\\" not in html
+    assert html == "<h1>Ada</h1><ul><li>Built payments at scale</li></ul>"
+
+
 def test_skills_list_only_what_the_posting_asks_for():
     skills = [
         RoleSkill(term="Go", category="Languages", evidence="Bujeti"),
