@@ -1,8 +1,11 @@
 import asyncio
 
+from bs4 import BeautifulSoup
+
 import findmeajob.tools.jobs as jobs
 from findmeajob.tools.jobs import search_job_batches, sources_for
 from findmeajob.tools.jobs.listing import Listing, matches, normalize_region
+from findmeajob.tools.jobs.logos import _domain_name, _read
 from findmeajob.tools.jobs.sources import Source, the_muse
 
 
@@ -128,3 +131,37 @@ def test_the_muse_is_only_enabled_with_a_key():
     muse = Source("themuse", "global", lambda client, skill: None)
     assert muse not in sources_for("nigeria", "any")
     assert muse in sources_for("nigeria", "any", (muse,))
+
+
+
+def test_logo_comes_from_the_hiring_company_structured_data():
+    page = BeautifulSoup(
+        '<script type="application/ld+json">{"hiringOrganization": {"name": "Monzo", "url": "https://monzo.com/",'
+        ' "logo": "https://board.example/monzo.png"}}</script><img src="/images/logo.png" alt="Board logo">',
+        "html.parser",
+    )
+
+    assert _read(page, "https://board.example/jobs/1", "Monzo") == ("https://board.example/monzo.png", "https://monzo.com/")
+
+
+def test_logo_skips_placeholders_and_dead_services_but_keeps_the_website():
+    page = BeautifulSoup(
+        '<script type="application/ld+json">{"@type": "Organization", "name": "DuckDuckGo",'
+        ' "url": "https://duckduckgo.com", "logo": "https://logo.clearbit.com/duckduckgo.com"}</script>'
+        '<img src="/company_logo/86/default-company-logo.png">',
+        "html.parser",
+    )
+
+    assert _read(page, "https://board.example/jobs/1", "DuckDuckGo") == ("", "https://duckduckgo.com")
+
+
+def test_logo_matches_board_images_by_company_name():
+    page = BeautifulSoup('<img src="/a.png" alt="Other logo"><img data-src="/acme.png" alt="Acme logo">', "html.parser")
+
+    assert _read(page, "https://board.example/jobs/1", "Acme")[0] == "https://board.example/acme.png"
+
+
+def test_search_websites_must_carry_the_company_name():
+    assert _domain_name("https://www.nimble-byte.com/") == "nimblebyte"
+    assert _domain_name("http://raincompany.co.kr/") == "raincompany"
+    assert _domain_name("https://camel.dev-aemwork.net/") == "devaemwork"

@@ -41,6 +41,10 @@ def _detail(found: int, opened: int, rediscovered: int, skill: str, region: str,
 
 
 async def _fill(workflow: Workflow, listing: Listing, posting: dict[str, Any]) -> None:
+    try:
+        posting["logo"] = await workflow.deps.company_logo(posting)
+    except Exception:
+        log.warning("Could not find a logo for %s", listing.company)
     if len(listing.description) >= SHORT_DESCRIPTION:
         return
     try:
@@ -148,5 +152,9 @@ async def add_link(workflow: Workflow, url: str) -> str:
     case_id = case_id_for(url)
     if not await workflow.store.aget(CASES, case_id):
         details = {**posting.model_dump(), "url": url, "source": "link"}
+        try:
+            details["logo"] = await workflow.deps.company_logo(details)
+        except Exception:
+            log.warning("Could not find a logo for %s", details["company"])
         await workflow.start(case_id, {**details, "apply_url": details["apply_url"] or url}, {})
     return case_id

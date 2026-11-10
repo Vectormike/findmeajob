@@ -112,6 +112,10 @@ async def no_employer_board(posting: dict) -> None:
     return None
 
 
+async def fake_company_logo(posting: dict) -> str:
+    return posting.get("logo") or "https://acme.example/logo.png"
+
+
 class FakeSession:
     def __init__(self, chrome: "FakeChrome") -> None:
         self.chrome = chrome

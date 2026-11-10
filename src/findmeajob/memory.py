@@ -124,6 +124,7 @@ async def index_case(store: BaseStore, state: dict[str, Any], agent: str) -> Non
     posting = state.get("posting", {})
     filters = state.get("filters", {})
     mail = state.get("mail", [])
+    stored = None if posting.get("logo") else await store.aget(CASES, state["case_id"])
     await store.aput(
         CASES,
         state["case_id"],
@@ -139,6 +140,7 @@ async def index_case(store: BaseStore, state: dict[str, Any], agent: str) -> Non
             "posted_at": posting.get("posted_at", ""),
             "remote": bool(posting.get("remote")),
             "source": posting.get("source", ""),
+            "logo": posting.get("logo") or (stored.value.get("logo", "") if stored else ""),
             "fit": (state.get("fit") or {}).get("recommendation", ""),
             "stage": state.get("stage", ""),
             "last_agent": agent,

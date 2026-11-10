@@ -49,6 +49,7 @@
 	let chip = $state('');
 	let list = $state<HTMLElement>();
 	let tools = $state<HTMLElement>();
+	let broken = $state<Record<string, boolean>>({});
 
 	const active = $derived(CHIPS.find((c) => c.key === chip));
 	const listed = $derived(active ? rows.filter(active.test) : rows);
@@ -143,7 +144,11 @@
 			<div class="slot" class:arrive={fresh[r.key]} style:--d={`${(stagger[r.key] ?? 0) * 420}ms`}>
 				<div class="clip">
 					<a class="job" href={`/inbox?case=${r.key}`}>
-						<span class="logo" style:background={bg} style:color={fg}>{initials(r.company || '?')}</span>
+						{#if r.logo && !broken[r.logo]}
+							<img class="logo image" src={r.logo} alt="" loading="lazy" referrerpolicy="no-referrer" onerror={() => (broken[r.logo!] = true)} />
+						{:else}
+							<span class="logo" style:background={bg} style:color={fg}>{initials(r.company || '?')}</span>
+						{/if}
 						<span class="body">
 							<span class="name">{r.title}</span>
 							<span class="meta">
@@ -239,6 +244,7 @@
 		display: grid; place-items: center; width: 42px; height: 42px; border-radius: 12px;
 		font-size: 14px; font-weight: 700; letter-spacing: -0.02em; box-shadow: inset 0 0 0 1px rgb(0 0 0 / 5%);
 	}
+	.logo.image { padding: 4px; object-fit: contain; background: #fff; border: 1px solid var(--line); box-shadow: none; }
 	.body { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 	.name { font-size: 15.5px; font-weight: 650; letter-spacing: -0.01em; line-height: 1.35; }
 	.body .meta b { color: var(--text); font-weight: 600; }

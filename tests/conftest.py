@@ -11,6 +11,7 @@ from tests.fakes import (
     FakeChrome,
     FakeGmail,
     FakeModel,
+    fake_company_logo,
     fake_fetch_page,
     fake_research,
     no_employer_board,
@@ -39,6 +40,7 @@ def deps(tmp_path: Any) -> Deps:
         research=fake_research,
         fetch_page=fake_fetch_page,
         employer_apply_url=no_employer_board,
+        company_logo=fake_company_logo,
     )
 
 

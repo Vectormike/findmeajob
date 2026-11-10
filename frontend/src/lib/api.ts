@@ -21,6 +21,7 @@ export type CaseRow = {
 	remote?: boolean;
 	source?: string;
 	fit?: string;
+	logo?: string;
 	stage: string;
 	last_agent: string;
 	updated_at: string;

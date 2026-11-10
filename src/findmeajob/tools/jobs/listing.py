@@ -69,6 +69,7 @@ class Listing(BaseModel):
     tags: list[str] = []
     salary: str = ""
     posted_at: str = ""
+    logo: str = ""
 
     def searchable(self) -> str:
         return " ".join([self.title, " ".join(self.tags), self.description])
