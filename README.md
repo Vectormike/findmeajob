@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/Vectormike/findmeajob/actions/workflows/ci.yml/badge.svg)](https://github.com/Vectormike/findmeajob/actions/workflows/ci.yml)
 
-**findmeajob** is a multi-agent job search workflow I built to explore applied LLM systems end to end: Scout sweeps public boards and employer sites, a LangGraph case graph runs Judge → Tailor → Clerk on each posting, and human-in-the-loop gates pause for Gmail traffic, interview notes, captcha handoffs, and Chaser drafts before anything is sent. A SvelteKit dashboard (served by FastAPI) is the control plane—filters, inbox, approvals, and per-agent retries. Grok (xAI) powers structured agent calls; Playwright drives real application forms when Clerk applies.
+**findmeajob** is a multi-agent job search workflow I built to explore applied LLM systems end to end: Scout sweeps public boards and employer sites, and a LangGraph case graph runs Judge → Tailor → Clerk on each posting. Clerk can submit applications without approval and may pause for a captcha handoff. The case then waits for Gmail traffic, interview notes, or decisions on Chaser drafts; Chaser drafts require approval before sending. A SvelteKit dashboard (served by FastAPI) is the control plane—filters, inbox, approvals, and per-agent retries. Grok (xAI) powers structured agent calls; Playwright drives real application forms when Clerk applies.
 
 <!-- Demo video: paste a link here when you record a walkthrough -->
 
@@ -56,7 +56,7 @@ Persistence: **PostgreSQL** stores LangGraph checkpoint and store data in `dev` 
 - **Python 3.12** — see `.python-version`
 - **Node.js 24** — see `frontend/.nvmrc`
 - **Docker** — Postgres via `docker compose` (local dev and production-like runs)
-- **Google Chrome** — Clerk and browser tests use Playwright’s Chrome channel (`channel="chrome"`). After install: `uv run playwright install-deps chrome` on Linux if system libraries are missing
+- **Google Chrome** — Clerk and browser tests use Playwright’s Chrome channel (`channel="chrome"`). After install: `uv run playwright install-deps chromium` on Linux if system libraries are missing
 - Optional: Gmail OAuth client files, Read AI webhook, xAI API key, The Muse API key (Scout only)
 
 ## Environment variables
